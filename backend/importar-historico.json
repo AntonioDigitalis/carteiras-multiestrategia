@@ -1,0 +1,856 @@
+{
+  "carteira": "Alfa",
+  "tipo": "B",
+  "perfis": ["conservadora", "moderada", "agressiva"],
+  "historico": [
+    {
+      "periodo": "2026-05-12",
+      "alocacao_macro": {
+        "conservadora": {
+          "pos_fixada": 0.725,
+          "inflacao": 0.125,
+          "pre_fixada": 0.05,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.025,
+          "renda_variavel_brasil": 0.0,
+          "renda_variavel_global": 0.025,
+          "fundos_listados": 0.025,
+          "alternativos": 0.0
+        },
+        "moderada": {
+          "pos_fixada": 0.355,
+          "inflacao": 0.225,
+          "pre_fixada": 0.1,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.14,
+          "renda_variavel_brasil": 0.05,
+          "renda_variavel_global": 0.035,
+          "fundos_listados": 0.04,
+          "alternativos": 0.03
+        },
+        "agressiva": {
+          "pos_fixada": 0.16,
+          "inflacao": 0.275,
+          "pre_fixada": 0.075,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.1,
+          "renda_variavel_brasil": 0.15,
+          "renda_variavel_global": 0.05,
+          "fundos_listados": 0.095,
+          "alternativos": 0.07
+        }
+      },
+      "produtos": {
+        "pos_fixada": [
+          {
+            "nome": "LFT – Selic + 0,01% - 01/03/2029",
+            "tipo": "tesouro",
+            "indexador": "SELIC",
+            "spread": 0.0001,
+            "data_emissao": "2026-05-12",
+            "data_vencimento": "2029-03-01",
+            "pesos": { "conservadora": 0.25, "moderada": 0.15, "agressiva": 0.085 }
+          },
+          {
+            "nome": "LCA Banco Original - 91% CDI - 05/04/2029",
+            "tipo": "lca",
+            "indexador": "CDI",
+            "percentual_cdi": 0.91,
+            "data_emissao": "2026-05-12",
+            "data_vencimento": "2029-04-05",
+            "pesos": { "conservadora": 0.13, "moderada": 0.055, "agressiva": 0.0 }
+          },
+          {
+            "nome": "AZ Quest Altro Advisory FIC FIF Multimercado CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.08, "moderada": 0.035, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Legacy Capital Credit Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.08, "moderada": 0.035, "agressiva": 0.045 }
+          },
+          {
+            "nome": "SulAmérica Crédito Ativo FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.105, "moderada": 0.045, "agressiva": 0.0 }
+          },
+          {
+            "nome": "XP Crédito Estruturado 360 FIDC RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.08, "moderada": 0.035, "agressiva": 0.03 }
+          }
+        ],
+        "inflacao": [
+          {
+            "nome": "NTN-B 15/08/2032 IPCA + 7,30%",
+            "tipo": "tesouro",
+            "indexador": "IPCA",
+            "spread": 0.073,
+            "data_emissao": "2026-05-12",
+            "data_vencimento": "2032-08-15",
+            "pesos": { "conservadora": 0.04, "moderada": 0.095, "agressiva": 0.1 }
+          },
+          {
+            "nome": "Debênture Isa Energia (CTEEP) - IPCA + 6,65% - 15/10/2036",
+            "tipo": "debenture",
+            "indexador": "IPCA",
+            "spread": 0.0665,
+            "data_emissao": "2026-05-12",
+            "data_vencimento": "2036-10-15",
+            "pesos": { "conservadora": 0.03, "moderada": 0.05, "agressiva": 0.05 }
+          },
+          {
+            "nome": "ARX Elbrus Advisory FIC INFRA RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.035, "moderada": 0.04, "agressiva": 0.075 }
+          },
+          {
+            "nome": "AZ Quest Debêntures Incentivadas CP FIC de FIF Incentivado de Investimento em Infra RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.02, "moderada": 0.04, "agressiva": 0.05 }
+          }
+        ],
+        "pre_fixada": [
+          {
+            "nome": "TREND PRÉ-FIXADO RESP LIMITADA FI RENDA FIXA LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.045, "agressiva": 0.035 }
+          },
+          {
+            "nome": "CDB Banco C6 - 14,6% - 24/04/2030",
+            "tipo": "cdb",
+            "indexador": "prefixado",
+            "taxa": 0.146,
+            "data_emissao": "2026-05-12",
+            "data_vencimento": "2030-04-24",
+            "pesos": { "conservadora": 0.025, "moderada": 0.055, "agressiva": 0.04 }
+          }
+        ],
+        "renda_fixa_global": [
+          {
+            "nome": "HYBR11",
+            "tipo": "etf",
+            "ticker": "HYBR11",
+            "pesos": { "conservadora": 0.025, "moderada": 0.025, "agressiva": 0.025 }
+          }
+        ],
+        "multimercado": [
+          {
+            "nome": "Kinea Atlas II FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Kapitalo K10 Advisory FIF em Cotas de FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Absolute Vertex Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.03, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Genoa Capital Radar Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.03, "agressiva": 0.02 }
+          }
+        ],
+        "renda_variavel_brasil": [
+          {
+            "nome": "XP Dividendos FIA",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.03, "agressiva": 0.06 }
+          },
+          {
+            "nome": "PIBB11",
+            "tipo": "etf",
+            "ticker": "PIBB11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.06 }
+          },
+          {
+            "nome": "Carteira Top Ações",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.03 }
+          }
+        ],
+        "renda_variavel_global": [
+          {
+            "nome": "Wellington Ventura FIA IE",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.025 }
+          },
+          {
+            "nome": "Trend Bolsas Globais",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.035, "agressiva": 0.025 }
+          }
+        ],
+        "fundos_listados": [
+          {
+            "nome": "Top FIIs",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.095 }
+          }
+        ],
+        "alternativos": [
+          {
+            "nome": "GOLX11",
+            "tipo": "etf",
+            "ticker": "GOLX11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.05 }
+          },
+          {
+            "nome": "Trend Commodities FIF RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.01, "agressiva": 0.02 }
+          }
+        ]
+      }
+    },
+    {
+      "periodo": "2026-04-09",
+      "alocacao_macro": {
+        "conservadora": {
+          "pos_fixada": 0.725,
+          "inflacao": 0.125,
+          "pre_fixada": 0.05,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.025,
+          "renda_variavel_brasil": 0.0,
+          "renda_variavel_global": 0.025,
+          "fundos_listados": 0.025,
+          "alternativos": 0.0
+        },
+        "moderada": {
+          "pos_fixada": 0.325,
+          "inflacao": 0.225,
+          "pre_fixada": 0.1,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.14,
+          "renda_variavel_brasil": 0.075,
+          "renda_variavel_global": 0.04,
+          "fundos_listados": 0.04,
+          "alternativos": 0.03
+        },
+        "agressiva": {
+          "pos_fixada": 0.125,
+          "inflacao": 0.275,
+          "pre_fixada": 0.075,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.095,
+          "renda_variavel_brasil": 0.175,
+          "renda_variavel_global": 0.06,
+          "fundos_listados": 0.095,
+          "alternativos": 0.07
+        }
+      },
+      "produtos": {
+        "pos_fixada": [
+          {
+            "nome": "LFT – Selic + 0,01% - 01/03/2029",
+            "tipo": "tesouro",
+            "indexador": "SELIC",
+            "spread": 0.0001,
+            "data_emissao": "2026-04-09",
+            "data_vencimento": "2029-03-01",
+            "pesos": { "conservadora": 0.25, "moderada": 0.12, "agressiva": 0.05 }
+          },
+          {
+            "nome": "LCA Banco Original - 91% CDI - 24/03/2028",
+            "tipo": "lca",
+            "indexador": "CDI",
+            "percentual_cdi": 0.91,
+            "data_emissao": "2026-04-09",
+            "data_vencimento": "2028-03-24",
+            "pesos": { "conservadora": 0.12, "moderada": 0.05, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Selection RF Light FIC FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.035, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Legacy Capital Credit Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.03, "agressiva": 0.035 }
+          },
+          {
+            "nome": "SulAmérica Crédito Ativo FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.085, "moderada": 0.03, "agressiva": 0.0 }
+          },
+          {
+            "nome": "XP Crédito Estruturado 360 FIDC RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.03, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Novus Renda Fixa Ativo Isento",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.03, "agressiva": 0.02 }
+          }
+        ],
+        "inflacao": [
+          {
+            "nome": "NTN-B 15/08/2032 IPCA + 7,30%",
+            "tipo": "tesouro",
+            "indexador": "IPCA",
+            "spread": 0.073,
+            "data_emissao": "2026-04-09",
+            "data_vencimento": "2032-08-15",
+            "pesos": { "conservadora": 0.04, "moderada": 0.095, "agressiva": 0.1 }
+          },
+          {
+            "nome": "Debênture Eletrobras (Axia) - IPCA + 6,60% - 15/09/2034",
+            "tipo": "debenture",
+            "indexador": "IPCA",
+            "spread": 0.066,
+            "data_emissao": "2026-04-09",
+            "data_vencimento": "2034-09-15",
+            "pesos": { "conservadora": 0.03, "moderada": 0.05, "agressiva": 0.05 }
+          },
+          {
+            "nome": "ARX Elbrus Advisory FIC INFRA RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.035, "moderada": 0.04, "agressiva": 0.075 }
+          },
+          {
+            "nome": "AZ Quest Debêntures Incentivadas CP FIC de FIF Incentivado de Investimento em Infra RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.02, "moderada": 0.04, "agressiva": 0.05 }
+          }
+        ],
+        "pre_fixada": [
+          {
+            "nome": "TREND PRÉ-FIXADO RESP LIMITADA FI RENDA FIXA LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.045, "agressiva": 0.035 }
+          },
+          {
+            "nome": "CDB Banco C6 - 14,6% - 24/03/2030",
+            "tipo": "cdb",
+            "indexador": "prefixado",
+            "taxa": 0.146,
+            "data_emissao": "2026-04-09",
+            "data_vencimento": "2030-03-24",
+            "pesos": { "conservadora": 0.025, "moderada": 0.055, "agressiva": 0.04 }
+          }
+        ],
+        "renda_fixa_global": [
+          {
+            "nome": "HYBR11",
+            "tipo": "etf",
+            "ticker": "HYBR11",
+            "pesos": { "conservadora": 0.025, "moderada": 0.025, "agressiva": 0.025 }
+          }
+        ],
+        "multimercado": [
+          {
+            "nome": "Kinea Atlas II FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Kapitalo K10 Advisory FIF em Cotas de FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Absolute Vertex Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.03, "agressiva": 0.015 }
+          },
+          {
+            "nome": "Genoa Capital Radar Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.03, "agressiva": 0.02 }
+          }
+        ],
+        "renda_variavel_brasil": [
+          {
+            "nome": "Real Investor FIC FIA BDR Nível 1",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.025, "agressiva": 0.055 }
+          },
+          {
+            "nome": "Trend Dividendos Brasil FIA Resp Limitada",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.03, "agressiva": 0.06 }
+          },
+          {
+            "nome": "PIBB11",
+            "tipo": "etf",
+            "ticker": "PIBB11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.06 }
+          }
+        ],
+        "renda_variavel_global": [
+          {
+            "nome": "Wellington Ventura FIA IE",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Trend Bolsas Globais",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.03 }
+          }
+        ],
+        "fundos_listados": [
+          {
+            "nome": "Top FIIs",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.095 }
+          }
+        ],
+        "alternativos": [
+          {
+            "nome": "GOLX11",
+            "tipo": "etf",
+            "ticker": "GOLX11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.05 }
+          },
+          {
+            "nome": "Trend Commodities FIF RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.01, "agressiva": 0.02 }
+          }
+        ]
+      }
+    },
+    {
+      "periodo": "2026-03-10",
+      "alocacao_macro": {
+        "conservadora": {
+          "pos_fixada": 0.7,
+          "inflacao": 0.125,
+          "pre_fixada": 0.05,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.05,
+          "renda_variavel_brasil": 0.0,
+          "renda_variavel_global": 0.025,
+          "fundos_listados": 0.025,
+          "alternativos": 0.0
+        },
+        "moderada": {
+          "pos_fixada": 0.325,
+          "inflacao": 0.225,
+          "pre_fixada": 0.1,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.165,
+          "renda_variavel_brasil": 0.075,
+          "renda_variavel_global": 0.035,
+          "fundos_listados": 0.02,
+          "alternativos": 0.03
+        },
+        "agressiva": {
+          "pos_fixada": 0.125,
+          "inflacao": 0.275,
+          "pre_fixada": 0.075,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.125,
+          "renda_variavel_brasil": 0.175,
+          "renda_variavel_global": 0.05,
+          "fundos_listados": 0.08,
+          "alternativos": 0.07
+        }
+      },
+      "produtos": {
+        "pos_fixada": [
+          {
+            "nome": "LFT – Selic + 0,01% - 01/03/2028",
+            "tipo": "tesouro",
+            "indexador": "SELIC",
+            "spread": 0.0001,
+            "data_emissao": "2026-03-10",
+            "data_vencimento": "2028-03-01",
+            "pesos": { "conservadora": 0.25, "moderada": 0.12, "agressiva": 0.05 }
+          },
+          {
+            "nome": "CRI Lavvi - 100% do CDI - 15/10/2032",
+            "tipo": "cri",
+            "indexador": "CDI",
+            "percentual_cdi": 1.0,
+            "data_emissao": "2026-03-10",
+            "data_vencimento": "2032-10-15",
+            "pesos": { "conservadora": 0.05, "moderada": 0.03, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Selection RF Light FIC FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.03, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Legacy Capital Credit Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.03, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Root Capital High Yield Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.05, "agressiva": 0.035 }
+          },
+          {
+            "nome": "SulAmérica Crédito Ativo FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.08, "moderada": 0.0, "agressiva": 0.0 }
+          },
+          {
+            "nome": "XP Crédito Estruturado 360 FIDC RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.035, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Novus Renda Fixa Ativo Isento",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.03, "agressiva": 0.02 }
+          }
+        ],
+        "inflacao": [
+          {
+            "nome": "NTN-B – IPCA + 7,2% – 15/05/2033",
+            "tipo": "tesouro",
+            "indexador": "IPCA",
+            "spread": 0.072,
+            "data_emissao": "2026-03-10",
+            "data_vencimento": "2033-05-15",
+            "pesos": { "conservadora": 0.04, "moderada": 0.085, "agressiva": 0.09 }
+          },
+          {
+            "nome": "Debênture Engie - IPCA + 6,1% - 15/06/2035",
+            "tipo": "debenture",
+            "indexador": "IPCA",
+            "spread": 0.061,
+            "data_emissao": "2026-03-10",
+            "data_vencimento": "2035-06-15",
+            "pesos": { "conservadora": 0.02, "moderada": 0.05, "agressiva": 0.05 }
+          },
+          {
+            "nome": "ARX Elbrus Advisory FIC INFRA RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.035, "moderada": 0.04, "agressiva": 0.075 }
+          },
+          {
+            "nome": "AZ Quest Debêntures Incentivadas CP FIC de FIF Incentivado de Investimento em Infra RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.03, "moderada": 0.05, "agressiva": 0.06 }
+          }
+        ],
+        "pre_fixada": [
+          {
+            "nome": "TREND PRÉ-FIXADO RESP LIMITADA FI RENDA FIXA LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.05, "moderada": 0.1, "agressiva": 0.075 }
+          }
+        ],
+        "renda_fixa_global": [
+          {
+            "nome": "HYBR11",
+            "tipo": "etf",
+            "ticker": "HYBR11",
+            "pesos": { "conservadora": 0.025, "moderada": 0.025, "agressiva": 0.025 }
+          }
+        ],
+        "multimercado": [
+          {
+            "nome": "Kinea Atlas II FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.045, "agressiva": 0.035 }
+          },
+          {
+            "nome": "Kapitalo K10 Advisory FIF em Cotas de FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Absolute Vertex Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Genoa Capital Radar Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.03 }
+          }
+        ],
+        "renda_variavel_brasil": [
+          {
+            "nome": "Real Investor FIC FIA BDR Nível 1",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.04 }
+          },
+          {
+            "nome": "Trend Momentum Brasil FIA RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.01, "agressiva": 0.045 }
+          },
+          {
+            "nome": "Carteira Top Dividendos",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.045 }
+          },
+          {
+            "nome": "Carteira Top Ações",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.0, "moderada": 0.025, "agressiva": 0.045 }
+          }
+        ],
+        "renda_variavel_global": [
+          {
+            "nome": "Wellington Ventura Advisory CI Ações IE RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Trend Bolsas Globais",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.035, "agressiva": 0.03 }
+          }
+        ],
+        "fundos_listados": [
+          {
+            "nome": "Top FIIs",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.025, "moderada": 0.02, "agressiva": 0.08 }
+          }
+        ],
+        "alternativos": [
+          {
+            "nome": "GOLX11",
+            "tipo": "etf",
+            "ticker": "GOLX11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.05 }
+          },
+          {
+            "nome": "Trend IA",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.01, "agressiva": 0.02 }
+          }
+        ]
+      }
+    },
+    {
+      "periodo": "2026-01-09",
+      "alocacao_macro": {
+        "conservadora": {
+          "pos_fixada": 0.7,
+          "inflacao": 0.125,
+          "pre_fixada": 0.05,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.05,
+          "renda_variavel_brasil": 0.0,
+          "renda_variavel_global": 0.025,
+          "fundos_listados": 0.025,
+          "alternativos": 0.0
+        },
+        "moderada": {
+          "pos_fixada": 0.325,
+          "inflacao": 0.225,
+          "pre_fixada": 0.1,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.165,
+          "renda_variavel_brasil": 0.075,
+          "renda_variavel_global": 0.035,
+          "fundos_listados": 0.02,
+          "alternativos": 0.03
+        },
+        "agressiva": {
+          "pos_fixada": 0.125,
+          "inflacao": 0.275,
+          "pre_fixada": 0.075,
+          "renda_fixa_global": 0.025,
+          "multimercado": 0.125,
+          "renda_variavel_brasil": 0.175,
+          "renda_variavel_global": 0.05,
+          "fundos_listados": 0.08,
+          "alternativos": 0.07
+        }
+      },
+      "produtos": {
+        "pos_fixada": [
+          {
+            "nome": "LFT – Selic + 0,01% - 01/03/2028",
+            "tipo": "tesouro",
+            "indexador": "SELIC",
+            "spread": 0.0001,
+            "data_emissao": "2026-01-09",
+            "data_vencimento": "2028-03-01",
+            "pesos": { "conservadora": 0.25, "moderada": 0.12, "agressiva": 0.05 }
+          },
+          {
+            "nome": "CRI Lavvi - 100% do CDI - 15/10/2032",
+            "tipo": "cri",
+            "indexador": "CDI",
+            "percentual_cdi": 1.0,
+            "data_emissao": "2026-01-09",
+            "data_vencimento": "2032-10-15",
+            "pesos": { "conservadora": 0.05, "moderada": 0.03, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Selection RF Light FIC FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.03, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Legacy Capital Credit Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.025, "agressiva": 0.0 }
+          },
+          {
+            "nome": "Root Capital High Yield Advisory FIC FIM CP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.07, "moderada": 0.06, "agressiva": 0.035 }
+          },
+          {
+            "nome": "SulAmérica Crédito Ativo FIRF CP LP",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.08, "moderada": 0.0, "agressiva": 0.0 }
+          },
+          {
+            "nome": "XP Crédito Estruturado 360 FIDC RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.035, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Novus Renda Fixa Ativo Isento",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.06, "moderada": 0.025, "agressiva": 0.0 }
+          }
+        ],
+        "inflacao": [
+          {
+            "nome": "NTN-B – IPCA + 7,2% – 15/05/2033",
+            "tipo": "tesouro",
+            "indexador": "IPCA",
+            "spread": 0.072,
+            "data_emissao": "2026-01-09",
+            "data_vencimento": "2033-05-15",
+            "pesos": { "conservadora": 0.04, "moderada": 0.085, "agressiva": 0.09 }
+          },
+          {
+            "nome": "CRA Minerva - IPCA + 8,3% - 16/07/2029",
+            "tipo": "cra",
+            "indexador": "IPCA",
+            "spread": 0.083,
+            "data_emissao": "2026-01-09",
+            "data_vencimento": "2029-07-16",
+            "pesos": { "conservadora": 0.02, "moderada": 0.05, "agressiva": 0.05 }
+          },
+          {
+            "nome": "ARX Elbrus Advisory FIC INFRA RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.035, "moderada": 0.04, "agressiva": 0.075 }
+          },
+          {
+            "nome": "AZ Quest Debêntures Incentivadas CP FIC de FIF Incentivado de Investimento em Infra RF",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.03, "moderada": 0.05, "agressiva": 0.06 }
+          }
+        ],
+        "pre_fixada": [
+          {
+            "nome": "CDB PicPay - 14,2% - 31/01/2029",
+            "tipo": "cdb",
+            "indexador": "prefixado",
+            "taxa": 0.142,
+            "data_emissao": "2026-01-09",
+            "data_vencimento": "2029-01-31",
+            "pesos": { "conservadora": 0.05, "moderada": 0.1, "agressiva": 0.075 }
+          }
+        ],
+        "renda_fixa_global": [
+          {
+            "nome": "T10R11",
+            "tipo": "etf",
+            "ticker": "T10R11",
+            "pesos": { "conservadora": 0.015, "moderada": 0.015, "agressiva": 0.01 }
+          },
+          {
+            "nome": "HYBR11",
+            "tipo": "etf",
+            "ticker": "HYBR11",
+            "pesos": { "conservadora": 0.01, "moderada": 0.01, "agressiva": 0.015 }
+          }
+        ],
+        "multimercado": [
+          {
+            "nome": "Kinea Atlas II FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.045, "agressiva": 0.035 }
+          },
+          {
+            "nome": "Kapitalo K10 Advisory FIF em Cotas de FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Absolute Vertex Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.03 }
+          },
+          {
+            "nome": "Genoa Capital Radar Advisory FIC FIM",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.04, "agressiva": 0.03 }
+          }
+        ],
+        "renda_variavel_brasil": [
+          {
+            "nome": "Real Investor FIC FIA BDR Nível 1",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.03, "agressiva": 0.045 }
+          },
+          {
+            "nome": "Trend Momentum Brasil FIA RL",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.045 }
+          },
+          {
+            "nome": "Carteira Top Dividendos",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.045 }
+          },
+          {
+            "nome": "Carteira Top Ações",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.0, "moderada": 0.025, "agressiva": 0.04 }
+          }
+        ],
+        "renda_variavel_global": [
+          {
+            "nome": "WHG Global Long Biased BRL FIC FIM CP IE",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.0, "agressiva": 0.02 }
+          },
+          {
+            "nome": "Trend Bolsas Globais",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.025, "moderada": 0.035, "agressiva": 0.03 }
+          }
+        ],
+        "fundos_listados": [
+          {
+            "nome": "Top FIIs",
+            "tipo": "carteira_interna",
+            "pesos": { "conservadora": 0.025, "moderada": 0.02, "agressiva": 0.08 }
+          }
+        ],
+        "alternativos": [
+          {
+            "nome": "GOLX11",
+            "tipo": "etf",
+            "ticker": "GOLX11",
+            "pesos": { "conservadora": 0.0, "moderada": 0.02, "agressiva": 0.05 }
+          },
+          {
+            "nome": "Trend IA",
+            "tipo": "fundo",
+            "pesos": { "conservadora": 0.0, "moderada": 0.01, "agressiva": 0.02 }
+          }
+        ]
+      }
+    }
+  ]
+}

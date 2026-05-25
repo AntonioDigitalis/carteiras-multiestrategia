@@ -1,0 +1,29 @@
+# Dependências
+node_modules/
+
+# Banco de dados (dados financeiros reais — nunca versionar)
+**/*.db
+backend/data/
+
+# Build do frontend
+frontend/dist/
+
+# Arquivos temporários CVM
+/tmp/cvm_*
+
+# Ambiente
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/settings.json
+.idea/
