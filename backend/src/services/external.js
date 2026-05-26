@@ -303,7 +303,7 @@ function getWeekdays(dataInicio, dataFim) {
 }
 
 async function fetchHistoricoB3(ticker, dataInicio, dataFim) {
-  // Limit B3 to last 30 days — disk cache makes repeated syncs fast
+  // Limit B3 daily bulletins to last 30 days — disk cache makes repeated syncs fast
   const limitDate = new Date(Date.now() - 30 * 24 * 3600000).toISOString().split('T')[0]
   const efetivo = dataInicio > limitDate ? dataInicio : limitDate
 
@@ -316,6 +316,69 @@ async function fetchHistoricoB3(ticker, dataInicio, dataFim) {
       if (price !== undefined) result.push({ date: day, close: price, adjustedClose: price })
     } catch (_) {
       // Trading holiday or network error — skip silently
+    }
+  }
+  return result
+}
+
+// In-memory cache: year → Map<ticker_date, price>
+const _cotahistCache = new Map()
+
+async function fetchCotahistAnual(year) {
+  if (_cotahistCache.has(year)) return _cotahistCache.get(year)
+
+  const url = `https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_A${year}.ZIP`
+  const { createRequire } = await import('module')
+  const fs = await import('fs')
+
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0' } })
+  if (!res.ok) throw new Error(`B3 COTAHIST ${year}: HTTP ${res.status}`)
+
+  const buf = Buffer.from(await res.arrayBuffer())
+  const tmpZip = `/tmp/cotahist_${year}.zip`
+  const tmpTxt = `/tmp/cotahist_${year}.txt`
+  fs.writeFileSync(tmpZip, buf)
+
+  const { execSync } = await import('child_process')
+  execSync(`unzip -o -p "${tmpZip}" > "${tmpTxt}"`)
+  const content = fs.readFileSync(tmpTxt, 'latin1')
+  fs.rmSync(tmpZip, { force: true })
+  fs.rmSync(tmpTxt, { force: true })
+
+  // Parse: tipo='01' (cotação diária), BDI='02' (lote padrão)
+  // pos 0-1: tipo, 2-9: data YYYYMMDD, 10-11: BDI, 12-23: ticker (12 chars), 108-120: preço fechamento
+  const byTicker = new Map()
+  for (const line of content.split('\n')) {
+    if (line.length < 121) continue
+    if (line[0] !== '0' || line[1] !== '1') continue
+    if (line[10] !== '0' || line[11] !== '2') continue
+    const tkr  = line.slice(12, 24).trimEnd()
+    const ds   = line.slice(2, 10)
+    const dt   = `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`
+    const preco = parseInt(line.slice(108, 121), 10) / 100
+    if (isNaN(preco)) continue
+    if (!byTicker.has(tkr)) byTicker.set(tkr, [])
+    byTicker.get(tkr).push({ date: dt, close: preco, adjustedClose: preco })
+  }
+
+  _cotahistCache.set(year, byTicker)
+  return byTicker
+}
+
+async function fetchHistoricoB3Cotahist(ticker, dataInicio, dataFim) {
+  const anoInicio = parseInt(dataInicio.slice(0, 4))
+  const anoFim    = parseInt(dataFim.slice(0, 4))
+  const result    = []
+
+  for (let ano = anoInicio; ano <= anoFim; ano++) {
+    try {
+      const byTicker = await fetchCotahistAnual(ano)
+      const registros = byTicker.get(ticker) || []
+      for (const r of registros) {
+        if (r.date >= dataInicio && r.date <= dataFim) result.push(r)
+      }
+    } catch (e) {
+      registrarLog('B3_COTAHIST', ticker, null, 'aviso', `${ano}: ${e.message}`)
     }
   }
   return result
@@ -350,17 +413,26 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
     } catch (eB3) {
       registrarLog('B3', ticker, null, 'aviso', eB3.message)
 
-      // 3ª tentativa: Alpha Vantage (últimos ~100 dias)
-      const alphaKey = getAlphaVantageKey()
-      if (!alphaKey) {
-        throw new Error(`Yahoo: ${e.message} | B3: ${eB3.message}. Configure a chave Alpha Vantage nas Configurações como último fallback.`)
-      }
+      // 3ª tentativa: B3 COTAHIST anual (histórico completo, inclui deslistados)
       try {
-        rows = await fetchHistoricoAlphaVantage(ticker, dataInicio, dataFim, alphaKey)
-        fonte = 'alphavantage'
-      } catch (e3) {
-        registrarLog('alphavantage', ticker, null, 'erro', e3.message)
-        throw new Error(`Yahoo: ${e.message} | B3: ${eB3.message} | Alpha Vantage: ${e3.message}`)
+        rows = await fetchHistoricoB3Cotahist(ticker, dataInicio, dataFim)
+        fonte = 'B3_COTAHIST'
+        if (rows.length === 0) throw new Error('Ticker não encontrado no COTAHIST B3')
+      } catch (eCotahist) {
+        registrarLog('B3_COTAHIST', ticker, null, 'aviso', eCotahist.message)
+
+        // 4ª tentativa: Alpha Vantage (últimos ~100 dias)
+        const alphaKey = getAlphaVantageKey()
+        if (!alphaKey) {
+          throw new Error(`Yahoo: ${e.message} | B3: ${eB3.message} | COTAHIST: ${eCotahist.message}. Configure a chave Alpha Vantage nas Configurações.`)
+        }
+        try {
+          rows = await fetchHistoricoAlphaVantage(ticker, dataInicio, dataFim, alphaKey)
+          fonte = 'alphavantage'
+        } catch (e3) {
+          registrarLog('alphavantage', ticker, null, 'erro', e3.message)
+          throw new Error(`Yahoo: ${e.message} | B3: ${eB3.message} | COTAHIST: ${eCotahist.message} | Alpha Vantage: ${e3.message}`)
+        }
       }
     }
   }
@@ -442,17 +514,29 @@ async function fetchCsvCVM(anoMes) {
   const csv = fs.readFileSync(`${tmpDir}/${csvFile}`, 'latin1')
   const linhas = csv.split('\n').slice(1) // pula header
 
-  // Agrupa por CNPJ (sem formatação)
+  // Agrupa por CNPJ, mantendo apenas a classe master (ID_SUBCLASSE vazio) por data.
+  // Fundos com sub-classes (ICVM 175) publicam múltiplas linhas por CNPJ+data;
+  // a linha com ID_SUBCLASSE vazio é a cota da classe mestre (VL_QUOTA ~1.0).
+  // As demais sub-classes têm cotas acumuladas maiores e gerariam retornos falsos.
   const porCnpj = new Map()
   for (const linha of linhas) {
     const cols = linha.split(';')
     if (cols.length < 6) continue
-    const cnpj = cols[1]?.trim()
-    const data = cols[3]?.trim()
-    const vlQuota = parseFloat(cols[5]?.trim())
+    const cnpj      = cols[1]?.trim()
+    const subclasse = cols[2]?.trim()   // vazio = classe master
+    const data      = cols[3]?.trim()
+    const vlQuota   = parseFloat(cols[5]?.trim())
     if (!cnpj || !data || isNaN(vlQuota)) continue
-    if (!porCnpj.has(cnpj)) porCnpj.set(cnpj, [])
-    porCnpj.get(cnpj).push({ data, valor: vlQuota })
+    if (!porCnpj.has(cnpj)) porCnpj.set(cnpj, new Map())
+    const porData = porCnpj.get(cnpj)
+    // Prefere a entrada com subclasse vazia; só aceita outra se ainda não há nenhuma para essa data
+    if (!porData.has(data) || subclasse === '') {
+      porData.set(data, { data, valor: vlQuota })
+    }
+  }
+  // Converte Map<data, registro> → array por CNPJ
+  for (const [cnpj, porData] of porCnpj) {
+    porCnpj.set(cnpj, [...porData.values()])
   }
 
   // Limpa arquivos temporários
@@ -463,17 +547,39 @@ async function fetchCsvCVM(anoMes) {
   return porCnpj
 }
 
+// Cache em memória do cadastral CVM (válido por 24h)
+let _cvmCadCache = null
+let _cvmCadTs = 0
+
+async function getCvmCadastral() {
+  if (_cvmCadCache && Date.now() - _cvmCadTs < 24 * 3600 * 1000) return _cvmCadCache
+  const url = 'https://dados.cvm.gov.br/dados/FI/CAD/DADOS/cad_fi.csv'
+  const res = await fetch(url, { headers: CVM_HEADERS })
+  if (!res.ok) throw new Error(`CVM cadastral HTTP ${res.status}`)
+  const text = await res.text()
+  const lines = text.split('\n')
+  const headers = lines[0].split(';')
+  const idx = { cnpj: headers.indexOf('CNPJ_FUNDO'), nome: headers.indexOf('DENOM_SOCIAL'), classe: headers.indexOf('CLASSE') }
+  const map = new Map()
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(';')
+    if (cols.length < 3) continue
+    map.set(cols[idx.cnpj]?.trim(), { nome: cols[idx.nome]?.trim(), classe: cols[idx.classe]?.trim() })
+  }
+  _cvmCadCache = map
+  _cvmCadTs = Date.now()
+  return map
+}
+
 export async function buscarFundoAnbima(cnpj) {
-  // Busca nome do fundo via CVM (registro cadastral)
-  const cnpjLimpo = cnpj.replace(/\D/g, '')
+  const d = cnpj.replace(/\D/g, '')
+  const cnpjFormatado = `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12,14)}`
   try {
-    const url = `https://dados.cvm.gov.br/api/3/action/datastore_search?resource_id=inf_cadastral_fi&filters={"CNPJ_FUNDO":"${cnpj}"}&limit=1`
-    const res = await fetch(url, { headers: CVM_HEADERS })
-    const data = await res.json()
-    const reg = data?.result?.records?.[0]
-    if (reg) return { cnpj, nome: reg.DENOM_SOCIAL || cnpj, classe: reg.CLASSE }
+    const map = await getCvmCadastral()
+    const reg = map.get(cnpjFormatado) || map.get(cnpj.trim())
+    if (reg?.nome) return { cnpj: cnpjFormatado, nome: reg.nome, classe: reg.classe || null }
   } catch (_) {}
-  return { cnpj, nome: cnpj, classe: null }
+  return { cnpj: cnpjFormatado, nome: null, classe: null }
 }
 
 export async function fetchCotaFundo(cnpj, dataInicio, dataFim) {

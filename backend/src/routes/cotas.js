@@ -155,27 +155,7 @@ router.post('/:produtoId/sync', async (req, res) => {
         }
       }
 
-      // Verificar cota travada (últimos 5 dias úteis)
-      const recentes = db.prepare(
-        `SELECT data, valor FROM cotas_cache WHERE produto_id = ? ORDER BY data DESC LIMIT 5`
-      ).all(produto.id)
-
-      if (recentes.length >= 3) {
-        const valoresUnicos = new Set(recentes.map((r) => r.valor))
-        if (valoresUnicos.size === 1) {
-          db.prepare(`
-            INSERT INTO alertas_auditoria (tipo, categoria, titulo, descricao, ativo, produto_id, data, valor_bruto, valor_usado, status)
-            VALUES ('error', 'cota_travada', 'Cota Travada', ?, ?, ?, ?, ?, ?, 'ativo')
-          `).run(
-            `Cota inalterada por ${recentes.length} dias úteis consecutivos`,
-            produto.nome,
-            produto.id,
-            hoje,
-            recentes[0].valor.toString(),
-            recentes[0].valor.toString(),
-          )
-        }
-      }
+      verificarCotasTravadas(db, [produto])
 
       res.json({ ok: true, sincronizados: cotas.length })
     } else if (produto.tipo === 'carteira') {
@@ -239,34 +219,41 @@ router.post('/sync-all', async (req, res) => {
     }
   }
 
-  // Verificar retornos anômalos (±30%)
+  // Verificar retornos anômalos e cotas travadas
   verificarRetornosAnomalos(db)
+  verificarCotasTravadas(db)
 
   res.json({ sincronizados, erros, total: produtos.length })
 })
 
 function verificarRetornosAnomalos(db) {
-  const produtos = db.prepare("SELECT * FROM produtos WHERE tipo IN ('fundo', 'acao')").all()
   const hoje = new Date().toISOString().split('T')[0]
   const umMesAtras = new Date(Date.now() - 32 * 24 * 3600000).toISOString().split('T')[0]
 
-  for (const p of produtos) {
+  // Deduplica por identificador — evita um alerta por produto_id para o mesmo ticker/CNPJ
+  const identificadores = db.prepare(
+    "SELECT DISTINCT identificador, tipo, nome, MIN(id) as produto_id FROM produtos WHERE tipo IN ('fundo','acao') AND identificador IS NOT NULL GROUP BY identificador"
+  ).all()
+
+  for (const p of identificadores) {
+    // Usa as cotas do produto_id mais antigo como representante do identificador
     const cotas = db.prepare(
       `SELECT valor, valor_ajustado FROM cotas_cache WHERE produto_id = ? AND data >= ? ORDER BY data`
-    ).all(p.id, umMesAtras)
+    ).all(p.produto_id, umMesAtras)
 
     if (cotas.length < 2) continue
 
-    const first = cotas[0].valor
-    const last = cotas[cotas.length - 1].valor_ajustado ?? cotas[cotas.length - 1].valor
+    // Usa valor_ajustado em ambos os extremos para evitar falsos positivos por splits/grupamentos
+    const first = cotas[0].valor_ajustado ?? cotas[0].valor
+    const last  = cotas[cotas.length - 1].valor_ajustado ?? cotas[cotas.length - 1].valor
 
     if (!first || first === 0) continue
     const retorno = last / first - 1
 
     if (Math.abs(retorno) > 0.30) {
       const existente = db.prepare(
-        `SELECT id FROM alertas_auditoria WHERE produto_id = ? AND categoria = 'retorno_anomalo' AND data = ? AND status = 'ativo'`
-      ).get(p.id, hoje)
+        `SELECT id FROM alertas_auditoria WHERE ativo = ? AND categoria = 'retorno_anomalo' AND data = ? AND status = 'ativo'`
+      ).get(p.identificador, hoje)
 
       if (!existente) {
         db.prepare(`
@@ -274,10 +261,58 @@ function verificarRetornosAnomalos(db) {
           VALUES ('warning', 'retorno_anomalo', 'Retorno Anômalo', ?, ?, ?, ?, ?, 'ativo')
         `).run(
           `Retorno de ${(retorno * 100).toFixed(1)}% no último mês — acima do limite de ±30%`,
-          p.nome, p.id, hoje, `${(retorno * 100).toFixed(2)}%`,
+          p.nome, p.produto_id, hoje, `${(retorno * 100).toFixed(2)}%`,
         )
       }
     }
+  }
+}
+
+function verificarCotasTravadas(db, lista = null) {
+  const hoje = new Date().toISOString().split('T')[0]
+  const produtos = lista ?? db.prepare("SELECT * FROM produtos WHERE tipo = 'fundo'").all()
+
+  // Trabalha por CNPJ único para evitar alertas duplicados (mesmo fundo em múltiplos estados)
+  const vistos = new Set()
+
+  for (const p of produtos) {
+    if (p.tipo !== 'fundo' || !p.identificador) continue
+    if (vistos.has(p.identificador)) continue
+    vistos.add(p.identificador)
+
+    const recentes = db.prepare(
+      `SELECT cc.data, cc.valor, p2.id as produto_id, p2.nome
+       FROM cotas_cache cc
+       JOIN produtos p2 ON cc.produto_id = p2.id
+       WHERE p2.identificador = ? AND p2.tipo = 'fundo'
+       ORDER BY cc.data DESC LIMIT 5`
+    ).all(p.identificador)
+
+    if (recentes.length < 5) continue
+
+    const valoresUnicos = new Set(recentes.map((r) => r.valor))
+    if (valoresUnicos.size > 1) continue
+
+    // Todos os 5 últimos dias com valor idêntico — cota travada
+    // Verifica se já existe alerta ativo para este identificador
+    const jaExiste = db.prepare(
+      `SELECT id FROM alertas_auditoria
+       WHERE ativo = ? AND categoria = 'cota_travada' AND status = 'ativo'`
+    ).get(p.nome)
+    if (jaExiste) continue
+
+    db.prepare(`
+      INSERT INTO alertas_auditoria
+        (tipo, categoria, titulo, descricao, ativo, produto_id, data, valor_bruto, valor_usado, status)
+      VALUES ('error', 'cota_travada', 'Cota Travada', ?, ?, ?, ?, ?, ?, 'ativo')
+    `).run(
+      `Cota inalterada nos últimos 5 dias úteis (valor: ${recentes[0].valor})`,
+      recentes[0].nome,
+      recentes[0].produto_id,
+      hoje,
+      recentes[0].valor.toString(),
+      recentes[0].valor.toString(),
+    )
   }
 }
 

@@ -116,6 +116,26 @@ router.get('/saude', (req, res) => {
   `)
 
   db.transaction(() => {
+    // Fechar alertas macro cujo CDI já chegou
+    for (const m of macro) {
+      if (m.cdi) {
+        db.prepare(`UPDATE alertas_auditoria SET status='revisado'
+                    WHERE categoria='macro' AND ativo=? AND status='ativo'`).run(m.mes)
+      }
+    }
+
+    // Fechar alertas cotas cujo produto agora tem dados
+    for (const p of produtos) {
+      if (p.tipo === 'rf_curva') continue
+      const id = p.identificador || p.nome
+      const allOk = p.periodos.every((pe) => pe.status !== 'sem_cotas')
+      if (allOk) {
+        db.prepare(`UPDATE alertas_auditoria SET status='revisado'
+                    WHERE categoria='cotas' AND ativo=? AND status='ativo'`).run(id)
+      }
+    }
+
+    // Criar novos alertas para dados ainda ausentes
     for (const m of macro) {
       if (!m.cdi) {
         const t = `CDI mensal ausente — ${m.mes}`
@@ -128,10 +148,15 @@ router.get('/saude', (req, res) => {
       if (missing.length > 0) {
         const id = p.identificador || p.nome
         const t = `Cotas ausentes: ${p.nome.slice(0, 40)}`
-        cotaStmt.run(t, id, `Sem cotas em ${missing.join(', ')}. Sincronize na tela de Gestão.`, t, id)
+        // Fechar alerta antigo com meses desatualizados antes de criar novo
+        db.prepare(`UPDATE alertas_auditoria SET status='revisado'
+                    WHERE categoria='cotas' AND ativo=? AND status='ativo' AND titulo=?`).run(id, t)
+        cotaStmt.run(t, id, `Sem cotas em ${[...new Set(missing)].join(', ')}. Sincronize na tela de Gestão.`, t, id)
       }
     }
   })()
+
+  verificarAlocacoes(db)
 
   const carteiras = db.prepare(`
     SELECT DISTINCT c.id, c.nome, pf.nome AS perfil_nome
@@ -143,6 +168,105 @@ router.get('/saude', (req, res) => {
 
   res.json({ macro, produtos, meses, carteiras })
 })
+
+// GET /api/auditoria/alocacoes — verifica divergências macro/micro em todas as carteiras
+router.get('/alocacoes', (req, res) => {
+  const db = getDb()
+  verificarAlocacoes(db)
+  const alertas = db.prepare(`
+    SELECT aa.*, c.nome AS carteira_nome, pf.nome AS perfil_nome
+    FROM alertas_auditoria aa
+    LEFT JOIN carteiras c ON aa.ativo = CAST(c.id AS TEXT)
+    LEFT JOIN perfis pf ON c.perfil_id = pf.id
+    WHERE aa.categoria IN ('alocacao_macro','alocacao_micro') AND aa.status = 'ativo'
+    ORDER BY aa.created_at DESC
+  `).all()
+  res.json(alertas)
+})
+
+function verificarAlocacoes(db) {
+  const hoje = new Date().toISOString().split('T')[0]
+  const CLASSES = ['pos_fixado','inflacao','prefixado','rf_global','multimercado','rv_brasil','rv_global','fundos_listados','alternativos']
+
+  const meses = db.prepare(`
+    SELECT DISTINCT ep.mes, ep.carteira_id, c.perfil_id, c.nome AS carteira_nome, pf.nome AS perfil_nome
+    FROM estados_portfolio ep
+    JOIN carteiras c ON ep.carteira_id = c.id
+    JOIN perfis pf ON c.perfil_id = pf.id
+    ORDER BY ep.carteira_id, ep.mes
+  `).all()
+
+  const insStmt = db.prepare(`
+    INSERT INTO alertas_auditoria (tipo, categoria, titulo, descricao, ativo, data, status)
+    SELECT 'warning', ?, ?, ?, ?, ?, 'ativo'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM alertas_auditoria WHERE categoria = ? AND ativo = ? AND titulo = ? AND status = 'ativo'
+    )
+  `)
+
+  db.transaction(() => {
+    for (const { mes, carteira_id, perfil_id, carteira_nome, perfil_nome } of meses) {
+      const aloc = db.prepare(
+        'SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes = ?'
+      ).get(perfil_id, mes)
+
+      const ativo = String(carteira_id)
+      const label = `${perfil_nome} — ${carteira_nome} / ${mes}`
+
+      // 1. Macro != 100%
+      if (aloc) {
+        const totalMacro = CLASSES.reduce((s, k) => s + (aloc[k] || 0), 0)
+        const tituloMacro = `Alocação macro incompleta — ${mes}`
+        if (Math.abs(totalMacro - 100) > 0.01) {
+          insStmt.run('alocacao_macro', tituloMacro,
+            `${label}: soma macro = ${totalMacro.toFixed(1)}% (esperado 100%)`,
+            ativo, hoje, 'alocacao_macro', ativo, tituloMacro)
+        } else {
+          db.prepare(`UPDATE alertas_auditoria SET status='revisado', updated_at=datetime('now')
+            WHERE categoria='alocacao_macro' AND ativo=? AND titulo=? AND status='ativo'`
+          ).run(ativo, tituloMacro)
+        }
+      }
+
+      // 2. Micro por classe != macro
+      const produtos = db.prepare(`
+        SELECT p.classe, SUM(p.peso) AS total_micro
+        FROM produtos p JOIN estados_portfolio ep ON p.estado_id = ep.id
+        WHERE ep.carteira_id = ? AND ep.mes = ?
+        GROUP BY p.classe
+      `).all(carteira_id, mes)
+
+      if (aloc && produtos.length > 0) {
+        const microPorClasse = {}
+        for (const p of produtos) microPorClasse[p.classe] = p.total_micro || 0
+
+        const divergencias = CLASSES.filter((k) => {
+          const macro = aloc[k] || 0
+          const micro = microPorClasse[k] || 0
+          return (macro > 0 || micro > 0) && Math.abs(micro - macro) > 0.01
+        })
+
+        const tituloMicro = `Divergência micro/macro — ${mes}`
+        if (divergencias.length > 0) {
+          const desc = divergencias.map((k) => {
+            const macro = (aloc[k] || 0).toFixed(1)
+            const micro = (microPorClasse[k] || 0).toFixed(1)
+            return `${k}: macro ${macro}% ≠ produtos ${micro}%`
+          }).join('; ')
+          insStmt.run('alocacao_micro', tituloMicro,
+            `${label}: ${desc}`,
+            ativo, hoje, 'alocacao_micro', ativo, tituloMicro)
+        } else {
+          db.prepare(`UPDATE alertas_auditoria SET status='revisado', updated_at=datetime('now')
+            WHERE categoria='alocacao_micro' AND ativo=? AND titulo=? AND status='ativo'`
+          ).run(ativo, tituloMicro)
+        }
+      }
+    }
+  })()
+}
+
+export { verificarAlocacoes }
 
 // GET /api/auditoria/eventos
 router.get('/eventos', (req, res) => {

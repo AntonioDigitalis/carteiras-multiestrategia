@@ -120,7 +120,7 @@ export const api = {
   saveConfig: (data) => request('/config', { method: 'PUT', body: data }),
 
   // Dados externos (proxied)
-  buscarFundo: (cnpj) => request(`/external/fundo/${cnpj}`),
+  buscarFundo: (cnpj) => request(`/external/fundo/${encodeURIComponent(cnpj)}`),
   validarTicker: (ticker) => request(`/external/ticker/${ticker}`),
   getCDI: (inicio, fim) => request(`/external/cdi?inicio=${inicio}&fim=${fim}`),
   getIPCA: (inicio, fim) => request(`/external/ipca?inicio=${inicio}&fim=${fim}`),

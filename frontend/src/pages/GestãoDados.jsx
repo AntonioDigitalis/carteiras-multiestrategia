@@ -413,6 +413,17 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
   for (const p of produtos) {
     totalPesoPorClasse[p.classe] = (totalPesoPorClasse[p.classe] || 0) + (p.peso || 0)
   }
+  const totalPeso = produtos.reduce((s, p) => s + (p.peso || 0), 0)
+  const totalPesoOk = Math.abs(totalPeso - 100) < 0.01
+
+  // Classes com divergência entre macro e micro
+  const divergencias = alocacao
+    ? Object.keys(CLASSES).filter((k) => {
+        const macro = alocacao[k] || 0
+        const micro = totalPesoPorClasse[k] || 0
+        return (macro > 0 || micro > 0) && Math.abs(micro - macro) > 0.01
+      })
+    : []
 
   return (
     <div className="space-y-3">
@@ -525,9 +536,46 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
               )
             })}
           </tbody>
+          <tfoot>
+            <tr className="border-t border-border">
+              <td colSpan={3} className="pt-2 text-xs text-slate-500 font-medium">Total</td>
+              <td className={clsx(
+                'pt-2 text-right font-mono text-xs font-medium',
+                totalPesoOk ? 'text-accent-green' : 'text-accent-red'
+              )}>
+                {totalPeso.toFixed(1)}% / 100%
+              </td>
+              <td />
+            </tr>
+          </tfoot>
         </table>
       ) : (
         <div className="text-xs text-slate-600 py-4 text-center">Nenhum produto adicionado</div>
+      )}
+
+      {produtos.length > 0 && !totalPesoOk && (
+        <div className="flex items-center gap-2 text-xs text-accent-red">
+          <AlertTriangle size={12} />
+          Soma dos produtos: {totalPeso.toFixed(1)}% — {totalPeso < 100 ? `faltam ${(100 - totalPeso).toFixed(1)}%` : `excesso de ${(totalPeso - 100).toFixed(1)}%`}
+        </div>
+      )}
+
+      {divergencias.length > 0 && (
+        <div className="space-y-1">
+          {divergencias.map((k) => {
+            const macro = alocacao[k] || 0
+            const micro = totalPesoPorClasse[k] || 0
+            return (
+              <div key={k} className="flex items-center gap-2 text-xs text-yellow-400">
+                <AlertTriangle size={12} className="shrink-0" />
+                <span>
+                  <span className="font-medium">{CLASSES[k]}</span>: macro {macro.toFixed(1)}% ≠ produtos {micro.toFixed(1)}%
+                  {' '}({micro > macro ? '+' : ''}{(micro - macro).toFixed(1)}%)
+                </span>
+              </div>
+            )
+          })}
+        </div>
       )}
 
       {showForm && (
@@ -555,20 +603,30 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
 function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteiraId }) {
   const { carteiras } = useCarteiras()
   const [buscando, setBuscando] = useState(false)
+  const [buscaErro, setBuscaErro] = useState(null)
 
   async function buscarNome() {
     if (!produto.identificador) return
     setBuscando(true)
+    setBuscaErro(null)
     try {
       if (produto.tipo === 'fundo') {
         const r = await api.buscarFundo(produto.identificador)
-        if (r.nome) onChange({ ...produto, nome: r.nome })
+        if (r.nome) {
+          onChange({ ...produto, nome: r.nome })
+        } else {
+          setBuscaErro('CNPJ não encontrado no cadastro CVM. Digite o nome manualmente.')
+        }
       } else if (produto.tipo === 'acao') {
         const r = await api.validarTicker(produto.identificador)
-        if (r.nome) onChange({ ...produto, nome: r.nome })
+        if (r.nome) {
+          onChange({ ...produto, nome: r.nome })
+        } else {
+          setBuscaErro('Ticker não encontrado. Digite o nome manualmente.')
+        }
       }
     } catch (e) {
-      // ignora
+      setBuscaErro('Erro ao buscar. Verifique o CNPJ e tente novamente.')
     } finally {
       setBuscando(false)
     }
@@ -650,6 +708,9 @@ function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteira
               {buscando ? '...' : 'Buscar'}
             </button>
           </div>
+          {buscaErro && (
+            <div className="text-[10px] text-accent-yellow mt-1">{buscaErro}</div>
+          )}
         </div>
       )}
 
