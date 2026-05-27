@@ -21,7 +21,7 @@ const BENCHMARKS_PASSIVA = {
   multimercado:    'CDI + 2,0% a.a. (proxy IHFA)',
   rv_brasil:       'Ibovespa',
   rv_global:       'ACWI + Hedge BRL',
-  fundos_listados: 'CDI + 2,0% a.a.',
+  fundos_listados: 'IFIX',
   alternativos:    'CDI',
 }
 
@@ -47,8 +47,14 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
     return cdiMensal  // fallback: CDI puro antes de jun/2022
   }
 
-  if (cls === 'fundos_listados' || cls === 'multimercado') {
+  if (cls === 'fundos_listados') {
+    const row = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IFIX_MENSAL' AND data=?`).get(mesData)
+    if (row) return row.valor / 100
     return cdiMensal + (Math.pow(1 + SPREADS_FALLBACK_AA[cls].spread, 1 / 12) - 1)
+  }
+
+  if (cls === 'multimercado') {
+    return cdiMensal + (Math.pow(1 + SPREADS_FALLBACK_AA.multimercado.spread, 1 / 12) - 1)
   }
 
   if (cls === 'inflacao') {
@@ -238,28 +244,77 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
     return calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim)
   }
 
-  // Fundo ou ação: busca por ticker/CNPJ em todos os portfolios — compartilha cotas
+  // Tickers renomeados que compartilham o mesmo histórico de preços
+  const TICKER_ALIASES = { 'CVBI11': 'PCIP11', 'PCIP11': 'CVBI11' }
+  const alias = TICKER_ALIASES[produto.identificador]
+  const identifiers = alias ? [produto.identificador, alias] : [produto.identificador]
+  const placeholders = identifiers.map(() => '?').join(', ')
+
+  // Query combinada (primário + alias) para cobertura máxima de datas com preço nominal
   const cotas = db.prepare(
-    `SELECT cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
+    `SELECT cc.data, MAX(cc.valor) AS valor
      FROM cotas_cache cc
      JOIN produtos p ON cc.produto_id = p.id
-     WHERE p.identificador = ? AND p.tipo = ?
+     WHERE p.identificador IN (${placeholders}) AND p.tipo = ?
        AND cc.data >= ? AND cc.data <= ?
      GROUP BY cc.data
      ORDER BY cc.data`
-  ).all(produto.identificador, produto.tipo, dataInicio, dataFim)
+  ).all(...identifiers, produto.tipo, dataInicio, dataFim)
 
   if (cotas.length < 2) return null
 
   const first = cotas[0]
-  const last = cotas[cotas.length - 1]
+  const last  = cotas[cotas.length - 1]
 
-  const valorInicio = produto.tipo === 'acao'
-    ? (first.valor_ajustado ?? first.valor)
-    : first.valor
-  const valorFim = produto.tipo === 'acao'
-    ? (last.valor_ajustado ?? last.valor)
-    : last.valor
+  // Incorporações e mudanças de ticker com valor patrimonial registrado:
+  // se existe um evento ticker_change com valor no período, usa esse valor como preço final.
+  const eventoIncorporacao = db.prepare(`
+    SELECT valor FROM eventos_corporativos
+    WHERE ticker = ? AND tipo = 'ticker_change' AND valor IS NOT NULL
+      AND data >= ? AND data <= ?
+    ORDER BY data DESC LIMIT 1
+  `).get(produto.identificador, dataInicio, dataFim)
+
+  let valorInicio, valorFim
+  if (eventoIncorporacao) {
+    valorInicio = first.valor
+    valorFim    = eventoIncorporacao.valor
+  } else if (produto.tipo === 'acao') {
+    // Para preços ajustados, usa SOMENTE o ticker primário — séries adj de tickers diferentes
+    // têm calibrações distintas e não podem ser combinadas.
+    const cotasPrimary = db.prepare(
+      `SELECT cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
+       FROM cotas_cache cc
+       JOIN produtos p ON cc.produto_id = p.id
+       WHERE p.identificador = ? AND p.tipo = ?
+         AND cc.data >= ? AND cc.data <= ?
+       GROUP BY cc.data ORDER BY cc.data`
+    ).all(produto.identificador, produto.tipo, dataInicio, dataFim)
+
+    const fp = cotasPrimary[0]
+    const lp = cotasPrimary[cotasPrimary.length - 1]
+
+    if (cotasPrimary.length >= 2 && fp?.valor_ajustado && lp?.valor_ajustado) {
+      const ratioFirst = fp.valor_ajustado / fp.valor
+      const ratioLast  = lp.valor_ajustado  / lp.valor
+      const ratioDrift = Math.max(ratioFirst, ratioLast) / Math.min(ratioFirst, ratioLast)
+      if (ratioDrift <= 4) {
+        valorInicio = fp.valor_ajustado
+        valorFim    = lp.valor_ajustado
+      } else {
+        // Ajuste corrompido (ex: recalibração mid-série) — usa nominal combinado
+        valorInicio = first.valor
+        valorFim    = last.valor
+      }
+    } else {
+      // Primário sem adj ou sem dados no período — usa nominal combinado (cobre datas via alias)
+      valorInicio = first.valor
+      valorFim    = last.valor
+    }
+  } else {
+    valorInicio = first.valor
+    valorFim    = last.valor
+  }
 
   if (!valorInicio || valorInicio === 0) return null
   return valorFim / valorInicio - 1
@@ -301,11 +356,18 @@ function calcularRetornoEstado(estado, produtos, dataInicio, dataFim) {
 
 export function calcularRetornoMes(carteiraId, mes, alocacao) {
   const db = getDb()
-  const estados = db.prepare(
+  let estados = db.prepare(
     `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
   ).all(carteiraId, mes)
 
-  if (estados.length === 0) return null
+  // Mês ainda não configurado — usa o estado aberto mais recente (data_fim IS NULL)
+  if (estados.length === 0) {
+    estados = db.prepare(
+      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes <= ? AND data_fim IS NULL ORDER BY mes DESC`
+    ).all(carteiraId, mes)
+    // Só estende se o estado imediatamente anterior for o mês passado (portfolio contínuo)
+    if (estados.length === 0) return null
+  }
 
   const [ano, m] = mes.split('-').map(Number)
   const inicioMes = `${mes}-01`
@@ -332,6 +394,50 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
   }
 
   return retornoMes - 1
+}
+
+// ── Alocações macro com extensão automática para meses não configurados ────
+
+function getAlocacoesExtendidas(db, perfilId, carteiraId, mesInicioStr, mesFimStr) {
+  const alocacoes = db.prepare(
+    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
+  ).all(perfilId, mesInicioStr, mesFimStr)
+
+  // Estende para meses além do último configurado se o portfolio tiver estado aberto
+  const estadoAberto = db.prepare(
+    `SELECT mes FROM estados_portfolio WHERE carteira_id = ? AND data_fim IS NULL ORDER BY mes DESC LIMIT 1`
+  ).get(carteiraId)
+
+  if (estadoAberto) {
+    const ultimaAlocGlobal = alocacoes.length > 0
+      ? alocacoes[alocacoes.length - 1]
+      : db.prepare(
+          `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes <= ? ORDER BY mes DESC LIMIT 1`
+        ).get(perfilId, mesFimStr)
+
+    if (ultimaAlocGlobal && ultimaAlocGlobal.mes < mesFimStr) {
+      if (ultimaAlocGlobal.mes < mesInicioStr) {
+        // Período inteiramente no futuro — gera todos os meses do período
+        let [y, m] = mesInicioStr.split('-').map(Number)
+        while (true) {
+          const mes = `${y}-${String(m).padStart(2, '0')}`
+          if (mes > mesFimStr) break
+          alocacoes.push({ ...ultimaAlocGlobal, mes })
+          m++; if (m > 12) { m = 1; y++ }
+        }
+      } else {
+        let [y, m] = ultimaAlocGlobal.mes.split('-').map(Number)
+        while (true) {
+          m++; if (m > 12) { m = 1; y++ }
+          const proximo = `${y}-${String(m).padStart(2, '0')}`
+          if (proximo > mesFimStr) break
+          alocacoes.push({ ...ultimaAlocGlobal, mes: proximo })
+        }
+      }
+    }
+  }
+
+  return alocacoes
 }
 
 // ── CDI mensal do cache ─────────────────────────────────────
@@ -367,12 +473,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const mesInicioStr = inicioStr.slice(0, 7)
   const mesFimStr = fimStr.slice(0, 7)
 
-  const alocacoes = db.prepare(
-    `SELECT * FROM alocacoes_macro
-     WHERE perfil_id = ? AND mes >= ? AND mes <= ?
-     ORDER BY mes`
-  ).all(carteira.perfil_id, mesInicioStr, mesFimStr)
-
+  const alocacoes = getAlocacoesExtendidas(db, carteira.perfil_id, carteiraId, mesInicioStr, mesFimStr)
   if (alocacoes.length === 0) return null
 
   // Calcular retornos mensais
@@ -534,10 +635,7 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
 
-  const alocacoes = db.prepare(
-    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
-  ).all(carteira.perfil_id, mesInicioStr, mesFimStr)
-
+  const alocacoes = getAlocacoesExtendidas(db, carteira.perfil_id, carteiraId, mesInicioStr, mesFimStr)
   if (alocacoes.length === 0) return null
 
   const ativoMetricas = calcularMetricas(carteiraId, dataInicio, dataFim)
@@ -807,27 +905,48 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
   const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
 
-  const meses = db.prepare(
+  // Meses com estados configurados no período (inclui mês corrente via estado aberto)
+  const mesesConfigurados = db.prepare(
     `SELECT DISTINCT ep.mes FROM estados_portfolio ep
      WHERE ep.carteira_id = ? AND ep.mes >= ? AND ep.mes <= ?
      ORDER BY ep.mes`
   ).all(carteiraId, mesInicioStr, mesFimStr).map((r) => r.mes)
 
+  // Estende para o mês corrente se o portfolio tiver estado aberto
+  const estadoAberto = db.prepare(
+    `SELECT mes FROM estados_portfolio WHERE carteira_id = ? AND data_fim IS NULL ORDER BY mes DESC LIMIT 1`
+  ).get(carteiraId)
+  const meses = [...mesesConfigurados]
+  if (estadoAberto && mesesConfigurados.length > 0) {
+    let [y, m] = mesesConfigurados[mesesConfigurados.length - 1].split('-').map(Number)
+    while (true) {
+      m++; if (m > 12) { m = 1; y++ }
+      const proximo = `${y}-${String(m).padStart(2, '0')}`
+      if (proximo > mesFimStr) break
+      meses.push(proximo)
+    }
+  }
+
   if (meses.length < 3) return { error: 'Período insuficiente de dados (mínimo 3 meses).' }
 
   // Retornos mensais por ativo
+  // Para tickers não presentes nesta carteira, busca produto em qualquer carteira como referência
   const ativosComDados = ativosParam.map((ativo) => {
     const retornosMensais = meses.map((mes) => {
       const [ano, m] = mes.split('-').map(Number)
       const inicioMes = `${mes}-01`
       const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
 
-      const produto = db.prepare(`
-        SELECT p.* FROM produtos p
-        JOIN estados_portfolio ep ON p.estado_id = ep.id
-        WHERE ep.carteira_id = ? AND ep.mes = ? AND p.identificador = ? AND p.classe = ?
-        LIMIT 1
-      `).get(carteiraId, mes, ativo.identificador, classe)
+      const produto =
+        db.prepare(`
+          SELECT p.* FROM produtos p
+          JOIN estados_portfolio ep ON p.estado_id = ep.id
+          WHERE ep.carteira_id = ? AND ep.mes = ? AND p.identificador = ? AND p.classe = ?
+          LIMIT 1
+        `).get(carteiraId, mes, ativo.identificador, classe)
+        // Fallback: ticker adicionado manualmente — usa qualquer produto com esse identificador
+        ?? db.prepare(`SELECT * FROM produtos WHERE identificador = ? AND tipo = ? LIMIT 1`)
+           .get(ativo.identificador, ativo.tipo)
 
       if (!produto) return null
       return calcularRetornoProduto(produto, inicioMes, fimMes)
@@ -845,7 +964,8 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       error: 'Dados insuficientes para simular. Sincronize as cotas dos ativos primeiro.',
       ativos: ativosComDados.map((a) => ({
         nome: a.nome, identificador: a.identificador, tipo: a.tipo,
-        n_meses_com_dados: a.n_meses_com_dados, valido: false,
+        n_meses_com_dados: a.n_meses_com_dados,
+        valido: a.n_meses_com_dados >= minMeses,
       })),
     }
   }
@@ -920,9 +1040,9 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       valido: ativosValidos.some((v) => v.identificador === a.identificador),
     })),
     fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
-    max_sharpe: { weights: toWeightMap(maxSharpe), ...maxSharpe },
-    min_vol: { weights: toWeightMap(minVol), ...minVol },
-    atual: { weights: toWeightMap({ weights: pesosAtuais }), ...portfolioStats(pesosAtuais) },
+    max_sharpe: { ...maxSharpe, weights: toWeightMap(maxSharpe) },
+    min_vol: { ...minVol, weights: toWeightMap(minVol) },
+    atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
     n_meses: T,
     n_simulacoes: nSimulacoes,
   }
@@ -944,11 +1064,8 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
   const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
 
-  const alocacoes = db.prepare(
-    `SELECT * FROM alocacoes_macro
-     WHERE perfil_id = ? AND mes >= ? AND mes <= ?
-     ORDER BY mes`
-  ).all(carteira.perfil_id, mesInicioStr, mesFimStr)
+  const alocacoes = getAlocacoesExtendidas(db, carteira.perfil_id, carteiraId, mesInicioStr, mesFimStr)
+  if (alocacoes.length === 0) return null
 
   const CLASSES = LABELS_CLASSE
 
@@ -1005,12 +1122,14 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         const pesoNorm = (p.peso || 0) / pesototal
         if (ret != null) retornoClasse += ret * pesoNorm
 
-        // Acumular por ativo
-        const ativoKey = `${p.nome}__${p.identificador ?? ''}__${cls}`
+        // Acumular por ativo — normaliza tickers renomeados para o nome canônico
+        const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
+        const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
+        const ativoKey = `${canonicalId}__${cls}`
         if (!acumAtivo[ativoKey]) {
           acumAtivo[ativoKey] = {
-            nome: p.nome,
-            identificador: p.identificador,
+            nome: canonicalId,
+            identificador: canonicalId,
             tipo: p.tipo,
             classe: cls,
             retorno_acum: 1,

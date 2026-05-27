@@ -690,6 +690,8 @@ const INDICES_CONFIG = [
   { serie: 'IRX_MENSAL',    ticker: '^IRX' },           // T-bill 13 sem (% a.a.) — custo hedge
   { serie: 'DEBB11_MENSAL', ticker: 'DEBB11.SA' },    // IDA-DI proxy (desde jun/2022)
 ]
+// IFIX não está no Yahoo Finance — buscado separadamente via Alpha Vantage
+const IFIX_AV_SYMBOL = 'IFIX.SAO'
 
 export async function fetchIndicesMercado(dataInicio, dataFim) {
   const db = getDb()
@@ -747,5 +749,34 @@ export async function fetchIndicesMercado(dataInicio, dataFim) {
       console.warn(`[indices] Falha em ${ticker}:`, e.message)
     }
   }
+  // IFIX via Alpha Vantage (Yahoo Finance não tem)
+  const avKey = getAlphaVantageKey()
+  if (avKey) {
+    try {
+      const avUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${IFIX_AV_SYMBOL}&apikey=${avKey}`
+      const avRes = await fetch(avUrl, { headers: CVM_HEADERS })
+      const avData = await avRes.json()
+      const ts = avData['Monthly Adjusted Time Series']
+      if (ts) {
+        const entries = Object.entries(ts)
+          .map(([date, v]) => ({ date, close: parseFloat(v['5. adjusted close'] ?? v['4. close']) }))
+          .filter((e) => !isNaN(e.close))
+          .sort((a, b) => a.date.localeCompare(b.date))
+
+        db.transaction(() => {
+          for (let i = 1; i < entries.length; i++) {
+            const mesData = entries[i].date.slice(0, 7) + '-01'
+            if (mesData < mesInicioCmp || mesData > mesFimCmp) continue
+            const retorno = (entries[i].close / entries[i - 1].close - 1) * 100
+            stmt.run('IFIX_MENSAL', mesData, retorno)
+            total++
+          }
+        })()
+      }
+    } catch (e) {
+      console.warn('[indices] Falha em IFIX via Alpha Vantage:', e.message)
+    }
+  }
+
   return total
 }

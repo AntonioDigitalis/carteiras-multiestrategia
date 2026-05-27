@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getDb } from '../db/database.js'
 import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel } from '../services/calculator.js'
-import { garantirDadosMacro } from '../services/external.js'
+import { garantirDadosMacro, fetchHistoricoBrapi } from '../services/external.js'
 
 const router = Router()
 
@@ -336,11 +336,46 @@ router.get('/:id/ativos-classe', (req, res) => {
 })
 
 // POST /api/carteiras/:id/otimizar-classe
-router.post('/:id/otimizar-classe', (req, res) => {
+router.post('/:id/otimizar-classe', async (req, res) => {
   try {
     const { classe, ativos, n_simulacoes, start, end } = req.body
     if (!classe) return res.status(400).json({ error: 'classe obrigatória' })
     if (!ativos || ativos.length < 2) return res.status(400).json({ error: 'Informe ao menos 2 ativos' })
+
+    const db = getDb()
+    const hoje = new Date().toISOString().split('T')[0]
+    const cincoAnosAtras = new Date(Date.now() - 5 * 365 * 24 * 3600000).toISOString().split('T')[0]
+    const dataInicio = start || cincoAnosAtras
+
+    // Sincroniza cotas de ativos de tipo 'acao' que ainda não têm dados na base
+    for (const ativo of ativos.filter((a) => a.tipo === 'acao' && a.identificador)) {
+      const temDados = db.prepare(
+        `SELECT COUNT(*) as n FROM cotas_cache cc
+         JOIN produtos p ON cc.produto_id = p.id
+         WHERE p.identificador = ?`
+      ).get(ativo.identificador).n
+
+      if (temDados === 0) {
+        try {
+          // Cria produto temporário ligado ao primeiro estado desta carteira
+          const estadoRef = db.prepare(
+            `SELECT id FROM estados_portfolio WHERE carteira_id = ? ORDER BY mes LIMIT 1`
+          ).get(Number(req.params.id))
+          if (!estadoRef) continue
+
+          const produtoId = db.prepare(
+            `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso)
+             VALUES (?, ?, ?, ?, ?, 0)`
+          ).run(estadoRef.id, ativo.nome || ativo.identificador, ativo.identificador, ativo.tipo, classe).lastInsertRowid
+
+          const { rows, insertMany } = await fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje)
+          insertMany(produtoId, rows)
+        } catch (e) {
+          console.warn(`[otimizar-classe] sync ${ativo.identificador}: ${e.message}`)
+        }
+      }
+    }
+
     const data = otimizarDentroClasse(
       Number(req.params.id), classe, ativos,
       start || null, end || null, n_simulacoes || 5000

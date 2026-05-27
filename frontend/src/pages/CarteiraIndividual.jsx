@@ -99,7 +99,9 @@ export default function CarteiraIndividual() {
         ))}
       </div>
 
-      {loadingMet ? (
+      {tab === 'otimizador' ? (
+        <OtimizadorTab carteiraId={id} period={period} />
+      ) : loadingMet ? (
         <LoadingSpinner text="Calculando métricas..." />
       ) : !metricas ? (
         <div className="text-center py-16 text-slate-500 text-sm">
@@ -112,7 +114,6 @@ export default function CarteiraIndividual() {
           {tab === 'risco' && <RiscoTab metricas={metricas} />}
           {tab === 'atribuicao' && <AtribuicaoTab carteiraId={id} period={period} />}
           {tab === 'passiva' && <PassivaTab carteiraId={id} period={period} />}
-          {tab === 'otimizador' && <OtimizadorTab carteiraId={id} period={period} />}
         </>
       )}
     </div>
@@ -785,7 +786,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
               onChange={(e) => setNovoId(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && adicionarAtivo()}
               placeholder="Ex: 12.345.678/0001-90 ou IVVB11"
-              className="flex-1 bg-surface border border-border rounded px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600"
+              className="flex-1 bg-bg-tertiary border border-border rounded px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-blue"
             />
             <button onClick={adicionarAtivo} disabled={addLoading} className="btn-primary text-xs px-3">
               {addLoading ? '...' : 'Adicionar'}
