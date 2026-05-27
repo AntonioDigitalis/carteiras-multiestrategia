@@ -613,7 +613,11 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
             if (cotasMap) {
               const valorHoje = cotasMap.get(dia)
               const valorAntes = ultimaCota.get(p.identificador)
-              if (valorHoje && valorAntes && valorAntes > 0) retP = valorHoje / valorAntes - 1
+              if (valorHoje && valorAntes && valorAntes > 0) {
+                const raw = valorHoje / valorAntes - 1
+                // Ignora retornos diários impossíveis (>40% num dia) — dados corrompidos (ex: ICVM 175 / Yahoo glitch)
+                if (Math.abs(raw) <= 0.40) retP = raw
+              }
             }
           }
           // tipo 'carteira': retorno diário ignorado (contribuição nula)
