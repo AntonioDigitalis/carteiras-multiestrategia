@@ -514,23 +514,22 @@ async function fetchCsvCVM(anoMes) {
   const csv = fs.readFileSync(`${tmpDir}/${csvFile}`, 'latin1')
   const linhas = csv.split('\n').slice(1) // pula header
 
-  // Agrupa por CNPJ, mantendo apenas a classe master (ID_SUBCLASSE vazio) por data.
-  // Fundos com sub-classes (ICVM 175) publicam múltiplas linhas por CNPJ+data;
-  // a linha com ID_SUBCLASSE vazio é a cota da classe mestre (VL_QUOTA ~1.0).
-  // As demais sub-classes têm cotas acumuladas maiores e gerariam retornos falsos.
+  // Agrupa por CNPJ, mantendo o valor MÁXIMO por data.
+  // Pré-ICVM 175: um único registro por CNPJ+data (ID_SUBCLASSE vazio), valor acumulado ex: 2.42.
+  // Pós-ICVM 175: múltiplos registros por CNPJ+data (todos com ID_SUBCLASSE não-vazio);
+  //   a classe original continua acumulando (~2.87) e novas classes iniciam em ~1.00.
+  // Usar o valor máximo garante continuidade da série histórica acumulada em ambas as eras.
   const porCnpj = new Map()
   for (const linha of linhas) {
     const cols = linha.split(';')
     if (cols.length < 6) continue
-    const cnpj      = cols[1]?.trim()
-    const subclasse = cols[2]?.trim()   // vazio = classe master
-    const data      = cols[3]?.trim()
-    const vlQuota   = parseFloat(cols[5]?.trim())
+    const cnpj    = cols[1]?.trim()
+    const data    = cols[3]?.trim()
+    const vlQuota = parseFloat(cols[5]?.trim())
     if (!cnpj || !data || isNaN(vlQuota)) continue
     if (!porCnpj.has(cnpj)) porCnpj.set(cnpj, new Map())
     const porData = porCnpj.get(cnpj)
-    // Prefere a entrada com subclasse vazia; só aceita outra se ainda não há nenhuma para essa data
-    if (!porData.has(data) || subclasse === '') {
+    if (!porData.has(data) || vlQuota > porData.get(data).valor) {
       porData.set(data, { data, valor: vlQuota })
     }
   }

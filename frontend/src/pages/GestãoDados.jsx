@@ -365,12 +365,35 @@ function FormularioMes({ carteiraId, mes, onSave }) {
 function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
   const [showForm, setShowForm] = useState(false)
   const [novoProduto, setNovoProduto] = useState({ tipo: 'fundo', nome: '', identificador: '', peso: 0, classe: 'pos_fixado', isento_ir: false })
-  const [buscando, setBuscando] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [savingDates, setSavingDates] = useState(false)
+  const [datesSaved, setDatesSaved] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editValues, setEditValues] = useState({})
+  const [filtro, setFiltro] = useState('')
 
   const produtos = estado.produtos || []
+
+  const produtosFiltrados = filtro
+    ? produtos.filter((p) =>
+        p.nome?.toLowerCase().includes(filtro.toLowerCase()) ||
+        CLASSES[p.classe]?.toLowerCase().includes(filtro.toLowerCase()) ||
+        p.tipo?.toLowerCase().includes(filtro.toLowerCase())
+      )
+    : produtos
+
+  const produtosPorClasse = {}
+  for (const p of produtosFiltrados) {
+    if (!produtosPorClasse[p.classe]) produtosPorClasse[p.classe] = []
+    produtosPorClasse[p.classe].push(p)
+  }
+
+  const totalPesoPorClasse = {}
+  for (const p of produtos) {
+    totalPesoPorClasse[p.classe] = (totalPesoPorClasse[p.classe] || 0) + (p.peso || 0)
+  }
+  const totalPeso = produtos.reduce((s, p) => s + (p.peso || 0), 0)
+  const totalPesoOk = Math.abs(totalPeso - 100) < 0.01
 
   function startEdit(p) {
     setEditingId(p.id)
@@ -388,6 +411,20 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
     }
   }
 
+  async function salvarVigencia() {
+    if (!estado.id) return
+    setSavingDates(true)
+    try {
+      await api.atualizarEstado(estado.id, { data_inicio: estado.inicio, data_fim: estado.fim || null })
+      setDatesSaved(true)
+      setTimeout(() => setDatesSaved(false), 2500)
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setSavingDates(false)
+    }
+  }
+
   async function adicionarProduto() {
     setSaving(true)
     try {
@@ -395,7 +432,6 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
         const created = await api.adicionarProduto(estado.id, novoProduto)
         onUpdate({ ...estado, produtos: [...produtos, created] })
       } else {
-        // criar o estado primeiro
         const est = await api.criarEstado(carteiraId, {
           mes,
           data_inicio: estado.inicio,
@@ -419,22 +455,6 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
     onUpdate({ ...estado, produtos: produtos.filter((p) => p.id !== produtoId) })
   }
 
-  const totalPesoPorClasse = {}
-  for (const p of produtos) {
-    totalPesoPorClasse[p.classe] = (totalPesoPorClasse[p.classe] || 0) + (p.peso || 0)
-  }
-  const totalPeso = produtos.reduce((s, p) => s + (p.peso || 0), 0)
-  const totalPesoOk = Math.abs(totalPeso - 100) < 0.01
-
-  // Classes com divergência entre macro e micro
-  const divergencias = alocacao
-    ? Object.keys(CLASSES).filter((k) => {
-        const macro = alocacao[k] || 0
-        const micro = totalPesoPorClasse[k] || 0
-        return (macro > 0 || micro > 0) && Math.abs(micro - macro) > 0.01
-      })
-    : []
-
   const fmtData = (d) => d ? format(parseISO(d), "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : null
   const inicioFmt = fmtData(estado.inicio)
   const fimFmt = fmtData(estado.fim)
@@ -453,14 +473,14 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
         </span>
       </div>
 
-      {/* Datas */}
-      <div className="flex gap-3 text-xs">
+      {/* Datas + botão salvar vigência */}
+      <div className="flex flex-wrap items-end gap-3 text-xs">
         <div>
           <label className="label">Data Início</label>
           <input
             type="date"
             value={estado.inicio || ''}
-            onChange={(e) => onUpdate({ ...estado, inicio: e.target.value })}
+            onChange={(e) => { onUpdate({ ...estado, inicio: e.target.value }); setDatesSaved(false) }}
             className="input text-xs py-1"
           />
         </div>
@@ -469,161 +489,199 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
           <input
             type="date"
             value={estado.fim || ''}
-            onChange={(e) => onUpdate({ ...estado, fim: e.target.value })}
+            onChange={(e) => { onUpdate({ ...estado, fim: e.target.value }); setDatesSaved(false) }}
             className="input text-xs py-1"
           />
         </div>
+        {estado.id ? (
+          <button
+            onClick={salvarVigencia}
+            disabled={savingDates}
+            className={clsx(
+              'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors',
+              datesSaved
+                ? 'bg-green-900/30 text-accent-green border border-green-700/40'
+                : 'btn-primary'
+            )}
+          >
+            {savingDates ? 'Salvando...' : datesSaved ? <><Check size={12} /> Salvo</> : 'Salvar Vigência'}
+          </button>
+        ) : (
+          <span className="text-[10px] text-slate-500 italic pb-1.5">
+            Datas serão salvas ao adicionar o primeiro produto
+          </span>
+        )}
       </div>
 
-      {/* Lista de produtos */}
+      {/* Filtro */}
+      {produtos.length > 0 && (
+        <input
+          type="text"
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          placeholder="Filtrar por nome, classe ou tipo…"
+          className="input text-xs py-1.5 w-full"
+        />
+      )}
+
+      {/* Produtos agrupados por classe */}
       {produtos.length > 0 ? (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-slate-500 border-b border-border">
-              <th className="text-left pb-2 font-medium">Produto</th>
-              <th className="text-left pb-2 font-medium">Tipo</th>
-              <th className="text-left pb-2 font-medium">Classe</th>
-              <th className="text-right pb-2 font-medium">Peso</th>
-              <th className="text-right pb-2 font-medium">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {produtos.map((p) => {
-              const isEditing = editingId === p.id
-              return (
-                <tr key={p.id} className={`border-b border-border/30 ${isEditing ? 'bg-slate-800/40' : ''}`}>
-                  {isEditing ? (
-                    <>
-                      <td className="py-1 pr-2" colSpan={2}>
-                        <div className="flex flex-col gap-1">
-                          <input
-                            className="input text-xs py-0.5 w-full"
-                            placeholder="Nome"
-                            value={editValues.nome}
-                            onChange={(e) => setEditValues({ ...editValues, nome: e.target.value })}
-                          />
-                          <input
-                            className="input text-xs py-0.5 font-mono w-full"
-                            placeholder={p.tipo === 'fundo' ? 'CNPJ' : 'Ticker'}
-                            value={editValues.identificador}
-                            onChange={(e) => setEditValues({ ...editValues, identificador: e.target.value })}
-                          />
-                        </div>
-                      </td>
-                      <td className="py-1 text-slate-500 text-xs">{CLASSES[p.classe] || p.classe}</td>
-                      <td className="py-1 text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="100"
-                            className="input text-xs py-0.5 w-20 text-right font-mono"
-                            value={editValues.peso}
-                            onChange={(e) => setEditValues({ ...editValues, peso: parseFloat(e.target.value) || 0 })}
-                          />
-                          {p.tipo === 'rf_curva' && (
-                            <label className="flex items-center gap-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={!!editValues.isento_ir}
-                                onChange={(e) => setEditValues({ ...editValues, isento_ir: e.target.checked })}
-                                className="accent-accent-blue w-3 h-3"
-                              />
-                              <span className="text-[10px] text-slate-400">Isento IR</span>
-                            </label>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-1 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => salvarEdicao(p.id)} className="text-accent-green hover:text-green-400" title="Salvar">
-                            <Check size={13} />
-                          </button>
-                          <button onClick={() => setEditingId(null)} className="text-slate-500 hover:text-slate-300" title="Cancelar">
-                            ✕
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-1.5 text-slate-300 font-medium">
-                        <div className="flex items-center gap-1.5">
-                          {p.nome}
-                          {p.isento_ir ? (
-                            <span className="text-[9px] font-medium bg-emerald-900/30 text-emerald-400 border border-emerald-700/30 rounded px-1.5 py-0.5 shrink-0">
-                              Isento IR
-                            </span>
-                          ) : null}
-                        </div>
-                        {p.identificador && <div className="text-[10px] text-slate-500 font-mono">{p.identificador}</div>}
-                      </td>
-                      <td className="py-1.5 text-slate-500">
-                        {p.tipo === 'carteira' ? (
-                          <span className="text-[10px] bg-blue-900/20 text-accent-blue border border-blue-800/30 rounded px-1.5 py-0.5">carteira composta</span>
-                        ) : p.tipo === 'rf_curva' ? (
-                          <span className="text-[10px]">RF curva</span>
-                        ) : p.tipo}
-                      </td>
-                      <td className="py-1.5 text-slate-500">{CLASSES[p.classe] || p.classe}</td>
-                      <td className="py-1.5 text-right font-mono text-slate-300">{p.peso?.toFixed(1)}%</td>
-                      <td className="py-1.5 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => startEdit(p)} className="text-slate-600 hover:text-accent-blue" title="Editar">
-                            <Edit2 size={12} />
-                          </button>
-                          <button onClick={() => removerProduto(p.id)} className="text-slate-600 hover:text-accent-red" title="Remover">
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  )}
-                </tr>
-              )
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-border">
-              <td colSpan={3} className="pt-2 text-xs text-slate-500 font-medium">Total</td>
-              <td className={clsx(
-                'pt-2 text-right font-mono text-xs font-medium',
-                totalPesoOk ? 'text-accent-green' : 'text-accent-red'
-              )}>
-                {totalPeso.toFixed(1)}% / 100%
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
-      ) : (
-        <div className="text-xs text-slate-600 py-4 text-center">Nenhum produto adicionado</div>
-      )}
+        <div className="space-y-3">
+          {Object.entries(CLASSES).map(([classeKey, classeLabel]) => {
+            const prods = produtosPorClasse[classeKey] || []
+            if (filtro && prods.length === 0) return null
+            const macroVal = alocacao?.[classeKey] || 0
+            const microVal = totalPesoPorClasse[classeKey] || 0
+            if (!filtro && prods.length === 0 && macroVal === 0) return null
+            const classeOk = Math.abs(microVal - macroVal) <= 0.01
 
-      {produtos.length > 0 && !totalPesoOk && (
-        <div className="flex items-center gap-2 text-xs text-accent-red">
-          <AlertTriangle size={12} />
-          Soma dos produtos: {totalPeso.toFixed(1)}% — {totalPeso < 100 ? `faltam ${(100 - totalPeso).toFixed(1)}%` : `excesso de ${(totalPeso - 100).toFixed(1)}%`}
-        </div>
-      )}
-
-      {divergencias.length > 0 && (
-        <div className="space-y-1">
-          {divergencias.map((k) => {
-            const macro = alocacao[k] || 0
-            const micro = totalPesoPorClasse[k] || 0
             return (
-              <div key={k} className="flex items-center gap-2 text-xs text-yellow-400">
-                <AlertTriangle size={12} className="shrink-0" />
-                <span>
-                  <span className="font-medium">{CLASSES[k]}</span>: macro {macro.toFixed(1)}% ≠ produtos {micro.toFixed(1)}%
-                  {' '}({micro > macro ? '+' : ''}{(micro - macro).toFixed(1)}%)
-                </span>
+              <div key={classeKey}>
+                {/* Cabeçalho da classe */}
+                <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary rounded-t border-b border-border/50">
+                  <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wide">
+                    {classeLabel}
+                  </span>
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                    {macroVal > 0 && (
+                      <span className={clsx(
+                        'px-1.5 py-0.5 rounded',
+                        classeOk
+                          ? 'text-accent-green bg-green-900/20'
+                          : 'text-accent-yellow bg-yellow-900/20'
+                      )}>
+                        {microVal.toFixed(1)}% / {macroVal.toFixed(1)}%
+                        {!classeOk && <span className="ml-1">({microVal > macroVal ? '+' : ''}{(microVal - macroVal).toFixed(1)}%)</span>}
+                      </span>
+                    )}
+                    {macroVal === 0 && microVal > 0 && (
+                      <span className="text-accent-yellow bg-yellow-900/20 px-1.5 py-0.5 rounded">
+                        {microVal.toFixed(1)}% sem meta macro
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {prods.length === 0 ? (
+                  <div className="text-[10px] text-slate-600 italic px-2 py-2 bg-bg-secondary/30 rounded-b">
+                    Nenhum produto nesta classe
+                  </div>
+                ) : (
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {prods.map((p) => {
+                        const isEditing = editingId === p.id
+                        return (
+                          <tr key={p.id} className={clsx(
+                            'border-b border-border/20',
+                            isEditing ? 'bg-slate-800/40' : 'hover:bg-bg-tertiary/40'
+                          )}>
+                            {isEditing ? (
+                              <>
+                                <td className="py-1.5 pr-2" colSpan={2}>
+                                  <div className="flex flex-col gap-1">
+                                    <input
+                                      className="input text-xs py-0.5 w-full"
+                                      placeholder="Nome"
+                                      value={editValues.nome}
+                                      onChange={(e) => setEditValues({ ...editValues, nome: e.target.value })}
+                                    />
+                                    <input
+                                      className="input text-xs py-0.5 font-mono w-full"
+                                      placeholder={p.tipo === 'fundo' ? 'CNPJ' : 'Ticker'}
+                                      value={editValues.identificador}
+                                      onChange={(e) => setEditValues({ ...editValues, identificador: e.target.value })}
+                                    />
+                                  </div>
+                                </td>
+                                <td className="py-1.5 text-right">
+                                  <div className="flex flex-col items-end gap-1">
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="100"
+                                      className="input text-xs py-0.5 w-20 text-right font-mono"
+                                      value={editValues.peso}
+                                      onChange={(e) => setEditValues({ ...editValues, peso: parseFloat(e.target.value) || 0 })}
+                                    />
+                                    {p.tipo === 'rf_curva' && (
+                                      <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!editValues.isento_ir}
+                                          onChange={(e) => setEditValues({ ...editValues, isento_ir: e.target.checked })}
+                                          className="accent-accent-blue w-3 h-3"
+                                        />
+                                        <span className="text-[10px] text-slate-400">Isento IR</span>
+                                      </label>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-1.5 text-right">
+                                  <div className="flex justify-end gap-1">
+                                    <button onClick={() => salvarEdicao(p.id)} className="text-accent-green hover:text-green-400" title="Salvar">
+                                      <Check size={13} />
+                                    </button>
+                                    <button onClick={() => setEditingId(null)} className="text-slate-500 hover:text-slate-300" title="Cancelar">
+                                      ✕
+                                    </button>
+                                  </div>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="py-1.5 pl-2 text-slate-300">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-medium">{p.nome}</span>
+                                    {p.tipo === 'carteira' && (
+                                      <span className="text-[9px] bg-blue-900/20 text-accent-blue border border-blue-800/30 rounded px-1.5 py-0.5">carteira</span>
+                                    )}
+                                    {p.tipo === 'rf_curva' && (
+                                      <span className="text-[9px] bg-slate-700/40 text-slate-400 rounded px-1.5 py-0.5">curva</span>
+                                    )}
+                                    {p.isento_ir ? (
+                                      <span className="text-[9px] bg-emerald-900/30 text-emerald-400 border border-emerald-700/30 rounded px-1.5 py-0.5">IR isento</span>
+                                    ) : null}
+                                  </div>
+                                  {p.identificador && <div className="text-[10px] text-slate-500 font-mono mt-0.5">{p.identificador}</div>}
+                                </td>
+                                <td className="py-1.5 text-right font-mono text-slate-300 pr-2 w-16">
+                                  {p.peso?.toFixed(1)}%
+                                </td>
+                                <td className="py-1.5 text-right w-14">
+                                  <div className="flex justify-end gap-2">
+                                    <button onClick={() => startEdit(p)} className="text-slate-600 hover:text-accent-blue" title="Editar">
+                                      <Edit2 size={12} />
+                                    </button>
+                                    <button onClick={() => removerProduto(p.id)} className="text-slate-600 hover:text-accent-red" title="Remover">
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             )
           })}
+
+          {/* Total */}
+          <div className={clsx(
+            'flex items-center justify-between px-2 py-1.5 rounded text-xs font-mono font-medium',
+            totalPesoOk ? 'bg-green-900/20 text-accent-green' : 'bg-red-900/20 text-accent-red'
+          )}>
+            <span className="font-sans font-medium">Total</span>
+            <span>{totalPeso.toFixed(1)}% / 100%</span>
+          </div>
         </div>
+      ) : (
+        <div className="text-xs text-slate-600 py-4 text-center">Nenhum produto adicionado</div>
       )}
 
       {showForm && (
@@ -764,16 +822,18 @@ function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteira
 
       {produto.tipo === 'rf_curva' && <CamposRFCurva produto={produto} onChange={onChange} />}
 
-      <div>
-        <label className="label">Nome</label>
-        <input
-          type="text"
-          value={produto.nome}
-          onChange={(e) => onChange({ ...produto, nome: e.target.value })}
-          placeholder="Nome do produto"
-          className="input text-xs"
-        />
-      </div>
+      {produto.tipo !== 'rf_curva' && (
+        <div>
+          <label className="label">Nome</label>
+          <input
+            type="text"
+            value={produto.nome}
+            onChange={(e) => onChange({ ...produto, nome: e.target.value })}
+            placeholder="Nome do produto"
+            className="input text-xs"
+          />
+        </div>
+      )}
 
       <div>
         <label className="label">Peso na Classe (%)</label>
@@ -790,7 +850,15 @@ function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteira
 
       <div className="flex justify-end gap-2 pt-1">
         <button onClick={onCancel} className="btn-secondary text-xs py-1">Cancelar</button>
-        <button onClick={onSave} disabled={saving || !produto.nome} className="btn-primary text-xs py-1">
+        <button
+          onClick={onSave}
+          disabled={
+            saving ||
+            !produto.nome ||
+            (produto.tipo === 'rf_curva' && (produto.taxa == null || !produto.data_vencimento))
+          }
+          className="btn-primary text-xs py-1"
+        >
           {saving ? 'Salvando...' : 'Adicionar'}
         </button>
       </div>
@@ -798,15 +866,112 @@ function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteira
   )
 }
 
+const TIPOS_RF = {
+  'LFT':              { emissorFixo: 'Tesouro Nacional', indexador: 'CDI',  tipoCdi: 'spread', isento: false },
+  'NTN-B':            { emissorFixo: 'Tesouro Nacional', indexador: 'IPCA', tipoCdi: null,     isento: false },
+  'NTN-F':            { emissorFixo: 'Tesouro Nacional', indexador: 'PRE',  tipoCdi: null,     isento: false },
+  'CDB':              { emissorFixo: null,                indexador: 'CDI',  tipoCdi: 'pct',    isento: false },
+  'LCI':              { emissorFixo: null,                indexador: 'CDI',  tipoCdi: 'pct',    isento: true  },
+  'LCA':              { emissorFixo: null,                indexador: 'CDI',  tipoCdi: 'pct',    isento: true  },
+  'LCD':              { emissorFixo: null,                indexador: 'CDI',  tipoCdi: 'pct',    isento: true  },
+  'CRI':              { emissorFixo: null,                indexador: 'IPCA', tipoCdi: null,     isento: true  },
+  'CRA':              { emissorFixo: null,                indexador: 'IPCA', tipoCdi: null,     isento: true  },
+  'DEB':              { emissorFixo: null,                indexador: 'IPCA', tipoCdi: null,     isento: false },
+  'DEB Incentivada':  { emissorFixo: null,                indexador: 'IPCA', tipoCdi: null,     isento: true  },
+  'Outro':            { emissorFixo: null,                indexador: 'CDI',  tipoCdi: 'pct',    isento: false },
+}
+
+function gerarNomeRF(tipo, emissor, indexador, taxa, tipo_cdi, data_vencimento) {
+  if (!tipo || taxa == null || taxa === '' || !data_vencimento) return ''
+  const [y, m] = data_vencimento.split('-')
+  const venc = `${m}/${y}`
+  let taxaStr
+  if (indexador === 'CDI') {
+    taxaStr = tipo_cdi === 'spread' ? `CDI +${taxa}%` : `${taxa}% CDI`
+  } else if (indexador === 'IPCA') {
+    taxaStr = `IPCA +${taxa}%`
+  } else {
+    taxaStr = `${taxa}%`
+  }
+  const emissorPart = emissor ? ` ${emissor}` : ''
+  return `${tipo}${emissorPart} – ${taxaStr} – ${venc}`
+}
+
 function CamposRFCurva({ produto, onChange }) {
+  const [tipoInst, setTipoInst] = useState('')
+  const [emissor, setEmissor] = useState('')
+  const [nomeManual, setNomeManual] = useState(false)
+
+  function handleTipoChange(tipo) {
+    setTipoInst(tipo)
+    const preset = TIPOS_RF[tipo]
+    if (!preset) return
+    const novoEmissor = preset.emissorFixo ?? emissor
+    if (preset.emissorFixo) setEmissor(preset.emissorFixo)
+    const nome = nomeManual ? produto.nome : gerarNomeRF(
+      tipo, novoEmissor, preset.indexador, produto.taxa, preset.tipoCdi ?? produto.tipo_cdi, produto.data_vencimento
+    )
+    onChange({
+      ...produto,
+      indexador: preset.indexador,
+      tipo_cdi:  preset.tipoCdi ?? produto.tipo_cdi ?? 'pct',
+      isento_ir: preset.isento,
+      nome,
+    })
+  }
+
+  function handleEmissorChange(em) {
+    setEmissor(em)
+    if (!nomeManual) {
+      onChange({ ...produto, nome: gerarNomeRF(tipoInst, em, produto.indexador, produto.taxa, produto.tipo_cdi, produto.data_vencimento) })
+    }
+  }
+
+  function handleFieldChange(updates) {
+    const next = { ...produto, ...updates }
+    if (!nomeManual) {
+      next.nome = gerarNomeRF(tipoInst, emissor, next.indexador, next.taxa, next.tipo_cdi, next.data_vencimento)
+    }
+    onChange(next)
+  }
+
+  const emissorFixo = tipoInst ? TIPOS_RF[tipoInst]?.emissorFixo : null
+
   return (
     <div className="space-y-3">
+
+      {/* Tipo de instrumento + emissor */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="label">Indexador</label>
+          <label className="label">Tipo de instrumento <span className="text-accent-red">*</span></label>
+          <select value={tipoInst} onChange={(e) => handleTipoChange(e.target.value)} className="input text-xs">
+            <option value="">Selecione...</option>
+            {Object.keys(TIPOS_RF).map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Emissor / Devedor {!emissorFixo && <span className="text-accent-red">*</span>}</label>
+          {emissorFixo ? (
+            <div className="input text-xs text-slate-400 bg-bg-secondary/50">{emissorFixo}</div>
+          ) : (
+            <input
+              type="text"
+              value={emissor}
+              onChange={(e) => handleEmissorChange(e.target.value)}
+              placeholder="Banco XYZ, Guardian…"
+              className="input text-xs"
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Indexador + taxa */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Indexador <span className="text-accent-red">*</span></label>
           <select
             value={produto.indexador || 'CDI'}
-            onChange={(e) => onChange({ ...produto, indexador: e.target.value })}
+            onChange={(e) => handleFieldChange({ indexador: e.target.value })}
             className="input text-xs"
           >
             <option value="CDI">CDI</option>
@@ -816,54 +981,88 @@ function CamposRFCurva({ produto, onChange }) {
         </div>
         <div>
           <label className="label">
-            {produto.indexador === 'CDI' ? '% do CDI ou spread a.a.' :
-             produto.indexador === 'IPCA' ? 'IPCA + spread a.a.' : 'Taxa a.a.'}
+            {produto.indexador === 'CDI'
+              ? (produto.tipo_cdi === 'spread' ? 'Spread a.a. (%)' : '% do CDI')
+              : produto.indexador === 'IPCA' ? 'Spread s/ IPCA (% a.a.)' : 'Taxa a.a. (%)'}
+            {' '}<span className="text-accent-red">*</span>
           </label>
           <input
             type="number"
             step={0.01}
-            value={produto.taxa || ''}
-            onChange={(e) => onChange({ ...produto, taxa: parseFloat(e.target.value) || 0 })}
-            placeholder={produto.indexador === 'CDI' ? '105 (% CDI) ou 1.2 (spread)' : '6.5'}
+            min={0}
+            value={produto.taxa ?? ''}
+            onChange={(e) => handleFieldChange({ taxa: parseFloat(e.target.value) || 0 })}
+            placeholder={produto.indexador === 'CDI' ? (produto.tipo_cdi === 'spread' ? '0.50' : '105') : '6.50'}
             className="input text-xs"
           />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">Data Emissão</label>
-          <input
-            type="date"
-            value={produto.data_emissao || ''}
-            onChange={(e) => onChange({ ...produto, data_emissao: e.target.value })}
-            className="input text-xs"
-          />
-        </div>
-        <div>
-          <label className="label">Data Vencimento</label>
-          <input
-            type="date"
-            value={produto.data_vencimento || ''}
-            onChange={(e) => onChange({ ...produto, data_vencimento: e.target.value })}
-            className="input text-xs"
-          />
-        </div>
-      </div>
+
+      {/* Tipo CDI */}
       {produto.indexador === 'CDI' && (
         <div>
-          <label className="label">Tipo CDI</label>
+          <label className="label">Modalidade CDI</label>
           <select
             value={produto.tipo_cdi || 'pct'}
-            onChange={(e) => onChange({ ...produto, tipo_cdi: e.target.value })}
+            onChange={(e) => handleFieldChange({ tipo_cdi: e.target.value })}
             className="input text-xs"
           >
-            <option value="pct">% do CDI (ex: 105%)</option>
-            <option value="spread">CDI + spread a.a.</option>
+            <option value="pct">% do CDI — ex: 105% CDI</option>
+            <option value="spread">CDI + spread — ex: CDI +0,5% a.a.</option>
           </select>
         </div>
       )}
 
-      {/* Isenção de IR */}
+      {/* Datas */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Data de emissão</label>
+          <input
+            type="date"
+            value={produto.data_emissao || ''}
+            onChange={(e) => handleFieldChange({ data_emissao: e.target.value })}
+            className="input text-xs"
+          />
+        </div>
+        <div>
+          <label className="label">Vencimento <span className="text-accent-red">*</span></label>
+          <input
+            type="date"
+            value={produto.data_vencimento || ''}
+            onChange={(e) => handleFieldChange({ data_vencimento: e.target.value })}
+            className="input text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Nome gerado */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="label mb-0">Nome do produto</label>
+          <button
+            type="button"
+            onClick={() => setNomeManual((v) => !v)}
+            className="text-[10px] text-accent-blue hover:underline"
+          >
+            {nomeManual ? '↺ Usar gerado automaticamente' : '✏ Editar manualmente'}
+          </button>
+        </div>
+        {nomeManual ? (
+          <input
+            type="text"
+            value={produto.nome}
+            onChange={(e) => onChange({ ...produto, nome: e.target.value })}
+            className="input text-xs"
+            placeholder="Nome livre"
+          />
+        ) : (
+          <div className={`input text-xs font-mono ${produto.nome ? 'text-slate-200' : 'text-slate-500 italic'}`}>
+            {produto.nome || 'Preencha tipo, taxa e vencimento…'}
+          </div>
+        )}
+      </div>
+
+      {/* Isento IR */}
       <label className="flex items-start gap-2.5 cursor-pointer group">
         <input
           type="checkbox"

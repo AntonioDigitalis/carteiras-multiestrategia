@@ -128,10 +128,11 @@ function ResultadoComparacao({ dados }) {
     { key: 'pct_meses_positivos', label: '% Meses Positivos', fmt: (v) => v != null ? `${(v * 100).toFixed(0)}%` : '—', bigger: true },
   ]
 
-  // Montar série temporal combinada
+  // Montar série temporal combinada (prefere diária se disponível)
   const serieMap = {}
-  dados.forEach((d, i) => {
-    (d.serie_retorno || []).forEach(({ data, retorno_acumulado }) => {
+  dados.forEach((d) => {
+    const src = d.serie_retorno_diaria || d.serie_retorno || []
+    src.forEach(({ data, retorno_acumulado }) => {
       if (!serieMap[data]) serieMap[data] = { data }
       serieMap[data][d.nome] = retorno_acumulado
     })
@@ -147,7 +148,12 @@ function ResultadoComparacao({ dados }) {
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={serie}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-              <XAxis dataKey="data" tick={{ fill: '#64748b', fontSize: 11 }} />
+              <XAxis
+                dataKey="data"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                interval="preserveStartEnd"
+                tickFormatter={(v) => { const [y, m] = v.split('-'); return `${m}/${y.slice(2)}` }}
+              />
               <YAxis
                 tick={{ fill: '#64748b', fontSize: 11 }}
                 tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}

@@ -121,7 +121,7 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
   const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = produto
   const db = getDb()
 
-  const inicio = dataInicio > data_emissao ? dataInicio : data_emissao
+  const inicio = data_emissao && data_emissao > dataInicio ? data_emissao : dataInicio
   const fim = dataFim < data_vencimento ? dataFim : data_vencimento
 
   if (inicio >= fim) return 0
@@ -461,6 +461,183 @@ function getCDIMensal(mes) {
   return row ? row.valor / 100 : null
 }
 
+// ── Série diária de retorno acumulado ─────────────────────
+// Um ponto por dia útil (via CDI_DIARIO). Para fundos/ações usa cotas reais;
+// para rf_curva, cálculo analítico dia a dia.
+
+function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
+  const db = getDb()
+
+  const carteira = db.prepare(
+    `SELECT c.*, p.id as perfil_id FROM carteiras c JOIN perfis p ON c.perfil_id = p.id WHERE c.id = ?`
+  ).get(carteiraId)
+  if (!carteira) return null
+
+  // Todos os estados ativos no período
+  const estados = db.prepare(`
+    SELECT * FROM estados_portfolio
+    WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+    ORDER BY data_inicio
+  `).all(carteiraId, dataFim, dataInicio)
+  if (!estados.length) return null
+
+  // Produtos de todos os estados (batch)
+  const estadoIds = estados.map((e) => e.id)
+  const phE = estadoIds.map(() => '?').join(',')
+  const todosProds = db.prepare(`SELECT * FROM produtos WHERE estado_id IN (${phE})`).all(...estadoIds)
+  const prodsByEstado = new Map()
+  for (const p of todosProds) {
+    if (!prodsByEstado.has(p.estado_id)) prodsByEstado.set(p.estado_id, [])
+    prodsByEstado.get(p.estado_id).push(p)
+  }
+
+  // Identifiers distintos de fundo/acao
+  const identifiers = [...new Set(
+    todosProds.filter((p) => (p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador)
+              .map((p) => p.identificador)
+  )]
+
+  // Cotas em batch (7 dias de buffer antes para calcular retorno do 1º dia)
+  const bufferInicio = new Date(dataInicio + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+  const cotasMapByIdent = new Map()
+  if (identifiers.length) {
+    const ph2 = identifiers.map(() => '?').join(',')
+    const rows = db.prepare(`
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor
+      FROM cotas_cache cc
+      JOIN produtos p ON cc.produto_id = p.id
+      WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
+      GROUP BY p.identificador, cc.data
+      ORDER BY p.identificador, cc.data
+    `).all(...identifiers, bufferStr, dataFim)
+    for (const r of rows) {
+      if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor)
+    }
+  }
+
+  // CDI diário e IPCA mensal
+  const cdiRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicio, dataFim)
+  if (!cdiRows.length) return null
+  const cdiByData = new Map(cdiRows.map((r) => [r.data, r.valor / 100]))
+  const diasUteis = cdiRows.map((r) => r.data)
+
+  const ipcaRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicio.slice(0, 7) + '-01', dataFim.slice(0, 7) + '-01')
+  const ipcaByMes = new Map(ipcaRows.map((r) => [r.data.slice(0, 7), r.valor / 100]))
+
+  // Alocações macro
+  const alocRows = db.prepare(
+    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
+  ).all(carteira.perfil_id, dataInicio.slice(0, 7), dataFim.slice(0, 7))
+  const alocByMes = new Map(alocRows.map((a) => [a.mes, a]))
+
+  function getAloc(mes) {
+    if (alocByMes.has(mes)) return alocByMes.get(mes)
+    const ant = [...alocByMes.keys()].filter((m) => m <= mes).sort()
+    return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
+  }
+
+  // "Última cota conhecida" — pré-alimentado com valores do buffer
+  const ultimaCota = new Map()
+  for (const [ident, cotasMap] of cotasMapByIdent) {
+    const antes = [...cotasMap.keys()].filter((d) => d < dataInicio).sort()
+    if (antes.length) ultimaCota.set(ident, cotasMap.get(antes[antes.length - 1]))
+  }
+
+  // Estado ativo para um dia: o mais recente cujo data_inicio <= dia
+  function getEstado(dia) {
+    let ativo = null
+    for (const e of estados) {
+      if (e.data_inicio > dia) break
+      if (!e.data_fim || e.data_fim >= dia) ativo = e
+    }
+    return ativo
+  }
+
+  // Ponto base inicial (dia antes do primeiro dia útil, retorno = 0)
+  const serie = []
+  let acumulado = 1
+  let acumuladoCDI = 1
+
+  for (const dia of diasUteis) {
+    const cdiDiario = cdiByData.get(dia) ?? 0
+    acumuladoCDI *= 1 + cdiDiario
+
+    const estado = getEstado(dia)
+    const mes = dia.slice(0, 7)
+    const aloc = getAloc(mes)
+
+    let retDiario = 0
+
+    if (estado && aloc) {
+      const prods = prodsByEstado.get(estado.id) || []
+      const classeMap = {}
+      for (const p of prods) {
+        if (!classeMap[p.classe]) classeMap[p.classe] = []
+        classeMap[p.classe].push(p)
+      }
+
+      for (const [classe, classeProds] of Object.entries(classeMap)) {
+        const pesoClasse = (aloc[classe] ?? 0) / 100
+        if (!pesoClasse) continue
+        const pesoTotal = classeProds.reduce((s, p) => s + (p.peso || 0), 0) || 1
+        let retClasse = 0
+
+        for (const p of classeProds) {
+          let retP = null
+
+          if (p.tipo === 'rf_curva') {
+            const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = p
+            if ((data_vencimento && dia > data_vencimento) || (data_emissao && dia < data_emissao)) {
+              retP = 0
+            } else if (indexador === 'PRE') {
+              retP = Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'CDI') {
+              retP = tipo_cdi === 'pct'
+                ? cdiDiario * (taxa / 100)
+                : cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'IPCA') {
+              const ipcaMensal = ipcaByMes.get(mes) ?? 0.005
+              retP = (Math.pow(1 + ipcaMensal, 1 / 21) - 1) + (Math.pow(1 + taxa / 100, 1 / 252) - 1)
+            }
+            if (retP !== null && isento_ir) retP /= (1 - 0.15)
+
+          } else if ((p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador) {
+            const cotasMap = cotasMapByIdent.get(p.identificador)
+            if (cotasMap) {
+              const valorHoje = cotasMap.get(dia)
+              const valorAntes = ultimaCota.get(p.identificador)
+              if (valorHoje && valorAntes && valorAntes > 0) retP = valorHoje / valorAntes - 1
+            }
+          }
+          // tipo 'carteira': retorno diário ignorado (contribuição nula)
+
+          if (retP !== null) retClasse += retP * ((p.peso || 0) / pesoTotal)
+        }
+
+        retDiario += retClasse * pesoClasse
+      }
+    }
+
+    acumulado *= 1 + retDiario
+    serie.push({ data: dia, retorno_acumulado: acumulado - 1, cdi_acumulado: acumuladoCDI - 1 })
+
+    // Avança "última cota conhecida"
+    for (const [ident, cotasMap] of cotasMapByIdent) {
+      const v = cotasMap.get(dia)
+      if (v !== undefined) ultimaCota.set(ident, v)
+    }
+  }
+
+  return serie
+}
+
 // ── Métricas completas ─────────────────────────────────────
 
 export function calcularMetricas(carteiraId, dataInicio, dataFim) {
@@ -474,11 +651,15 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
 
   if (!carteira) return null
 
-  // Buscar alocações macro no período
-  const [anoInicio, mesInicio] = dataInicio
-    ? dataInicio.split('-')
-    : ['2020', '01']
-  const inicioStr = dataInicio || '2020-01-01'
+  // Quando sem dataInicio (preset "Início"), usa o primeiro dia do primeiro estado da carteira
+  const primeiroEstado = !dataInicio
+    ? db.prepare(
+        `SELECT MIN(data_inicio) as data_inicio FROM estados_portfolio WHERE carteira_id = ?`
+      ).get(carteiraId)
+    : null
+  const inicioEfetivo = dataInicio || primeiroEstado?.data_inicio || '2020-01-01'
+
+  const inicioStr = inicioEfetivo
   const fimStr = dataFim || new Date().toISOString().split('T')[0]
 
   const mesInicioStr = inicioStr.slice(0, 7)
@@ -582,6 +763,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     pct_meses_positivos: retornos.filter((r) => r > 0).length / retornos.length,
     retornos_mensais: retornosMensais,
     serie_retorno: serieRetorno,
+    serie_retorno_diaria: calcularSerieDiaria(carteiraId, inicioStr, fimStr),
     n_meses: retornosMensais.length,
   }
 }
@@ -643,7 +825,13 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   ).get(carteiraId)
   if (!carteira) return null
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
+  // Mesmo critério de "Início" que calcularMetricas: usa o primeiro estado da carteira
+  const primeiroEstado = !dataInicio
+    ? db.prepare(`SELECT MIN(data_inicio) as data_inicio FROM estados_portfolio WHERE carteira_id = ?`).get(carteiraId)
+    : null
+  const inicioEfetivo = dataInicio || primeiroEstado?.data_inicio || '2020-01-01'
+
+  const mesInicioStr = inicioEfetivo.slice(0, 7)
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
 
   const alocacoes = getAlocacoesExtendidas(db, carteira.perfil_id, carteiraId, mesInicioStr, mesFimStr)
@@ -730,8 +918,42 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
     rolling_alpha.push({ data: janela[janela.length - 1].mes, alpha_12m: acumAtivJan / acumPassJan - 1 })
   }
 
+  // Série diária: passivo distribuído uniformemente pelos dias úteis do mês;
+  // ativo usa a série diária real de calcularMetricas.
+  let serieDiaria = null
+  const ativoSerieDiaria = ativoMetricas.serie_retorno_diaria
+  if (ativoSerieDiaria?.length > 1) {
+    const cdiDiarios = db.prepare(
+      `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+    ).all(inicioEfetivo, dataFim || new Date().toISOString().split('T')[0])
+
+    // Conta dias úteis por mês
+    const diasPorMes = new Map()
+    for (const { data } of cdiDiarios) {
+      const m = data.slice(0, 7)
+      diasPorMes.set(m, (diasPorMes.get(m) || 0) + 1)
+    }
+
+    const passivoMensal = new Map(retornosMensais.map((r) => [r.mes, r.passivo]))
+    const ativoByData = new Map(ativoSerieDiaria.map((p) => [p.data, p.retorno_acumulado]))
+
+    let acumPassDiario = 1
+    serieDiaria = cdiDiarios.map(({ data }) => {
+      const mes = data.slice(0, 7)
+      const retMes = passivoMensal.get(mes) ?? 0
+      const n = diasPorMes.get(mes) || 21
+      acumPassDiario *= Math.pow(1 + retMes, 1 / n)
+      return {
+        data,
+        passivo_acumulado: acumPassDiario - 1,
+        ativo_acumulado: ativoByData.get(data) ?? null,
+      }
+    })
+  }
+
   return {
     serie,
+    serie_diaria: serieDiaria,
     rolling_alpha,
     metricas_ativo: {
       retorno_acumulado: ativoMetricas.retorno_acumulado,
@@ -1139,7 +1361,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         const ativoKey = `${canonicalId}__${cls}`
         if (!acumAtivo[ativoKey]) {
           acumAtivo[ativoKey] = {
-            nome: canonicalId,
+            nome: p.nome || canonicalId,
             identificador: canonicalId,
             tipo: p.tipo,
             classe: cls,

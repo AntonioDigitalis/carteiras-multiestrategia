@@ -152,11 +152,11 @@ function OverviewTab({ metricas }) {
       </div>
 
       {/* Gráfico de performance */}
-      {m.serie_retorno?.length > 0 && (
+      {(m.serie_retorno_diaria ?? m.serie_retorno)?.length > 0 && (
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-4">Retorno Acumulado</div>
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={m.serie_retorno}>
+            <AreaChart data={m.serie_retorno_diaria ?? m.serie_retorno}>
               <defs>
                 <linearGradient id="retGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -164,7 +164,15 @@ function OverviewTab({ metricas }) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-              <XAxis dataKey="data" tick={{ fill: '#64748b', fontSize: 11 }} />
+              <XAxis
+                dataKey="data"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                interval="preserveStartEnd"
+                tickFormatter={(v) => {
+                  const [y, m] = v.split('-')
+                  return `${m}/${y.slice(2)}`
+                }}
+              />
               <YAxis
                 tick={{ fill: '#64748b', fontSize: 11 }}
                 tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
@@ -180,9 +188,10 @@ function OverviewTab({ metricas }) {
                 stroke="#3b82f6"
                 strokeWidth={2}
                 fill="url(#retGrad)"
+                dot={false}
                 name="Carteira"
               />
-              {m.serie_retorno[0]?.cdi_acumulado != null && (
+              {(m.serie_retorno_diaria ?? m.serie_retorno)[0]?.cdi_acumulado != null && (
                 <Line
                   type="monotone"
                   dataKey="cdi_acumulado"
@@ -227,17 +236,59 @@ function OverviewTab({ metricas }) {
 
 function RetornoTab({ metricas }) {
   const m = metricas
+  const serieAcum = m.serie_retorno_diaria ?? m.serie_retorno
+
   return (
     <div className="space-y-4">
-      {m.retornos_mensais?.length > 0 ? (
+      {serieAcum?.length > 1 && (
         <div className="card">
-          <div className="text-sm font-medium text-slate-300 mb-4">Retornos Mensais</div>
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={m.retornos_mensais}>
+          <div className="text-sm font-medium text-slate-300 mb-4">Retorno Acumulado (diário)</div>
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={serieAcum}>
+              <defs>
+                <linearGradient id="retGrad2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-              <XAxis dataKey="mes" tick={{ fill: '#64748b', fontSize: 11 }} />
+              <XAxis
+                dataKey="data"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                interval="preserveStartEnd"
+                tickFormatter={(v) => { const [y, mo] = v.split('-'); return `${mo}/${y.slice(2)}` }}
+              />
               <YAxis
                 tick={{ fill: '#64748b', fontSize: 11 }}
+                tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
+              />
+              <Tooltip
+                contentStyle={{ background: '#1e2132', border: '1px solid #2a2d3e', borderRadius: 6 }}
+                labelStyle={{ color: '#94a3b8', fontSize: 11 }}
+                formatter={(v) => [`${(v * 100).toFixed(2)}%`, '']}
+              />
+              <Legend />
+              <Area type="monotone" dataKey="retorno_acumulado" stroke="#3b82f6" strokeWidth={2}
+                fill="url(#retGrad2)" dot={false} name="Carteira" />
+              {serieAcum[0]?.cdi_acumulado != null && (
+                <Line type="monotone" dataKey="cdi_acumulado" stroke="#64748b"
+                  strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="CDI" />
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {m.retornos_mensais?.length > 0 && (
+        <div className="card">
+          <div className="text-sm font-medium text-slate-300 mb-4">Retornos Mensais</div>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={m.retornos_mensais}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
+              <XAxis dataKey="mes" tick={{ fill: '#64748b', fontSize: 11 }}
+                tickFormatter={(v) => { const [y, mo] = v.split('-'); return `${mo}/${y.slice(2)}` }}
+              />
+              <YAxis tick={{ fill: '#64748b', fontSize: 11 }}
                 tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
               />
               <Tooltip
@@ -245,13 +296,12 @@ function RetornoTab({ metricas }) {
                 formatter={(v) => [`${(v * 100).toFixed(2)}%`, '']}
               />
               <Legend />
+              <ReferenceLine y={0} stroke="#475569" strokeWidth={1} />
               <Line type="monotone" dataKey="retorno" stroke="#3b82f6" dot={false} name="Carteira" />
               <Line type="monotone" dataKey="cdi" stroke="#64748b" strokeDasharray="4 2" dot={false} name="CDI" />
             </LineChart>
           </ResponsiveContainer>
         </div>
-      ) : (
-        <div className="card text-center py-8 text-slate-500 text-sm">Sem dados mensais</div>
       )}
     </div>
   )
@@ -426,13 +476,18 @@ function PassivaTab({ carteiraId, period }) {
   return (
     <div className="space-y-6">
       {/* Gráfico retorno acumulado */}
-      {data.serie?.length > 1 && (
+      {(data.serie_diaria ?? data.serie)?.length > 1 && (
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-4">Retorno Acumulado: Ativa vs Passiva</div>
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={data.serie}>
+            <LineChart data={data.serie_diaria ?? data.serie}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-              <XAxis dataKey="data" tick={{ fill: '#64748b', fontSize: 11 }} />
+              <XAxis
+                dataKey="data"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                interval="preserveStartEnd"
+                tickFormatter={(v) => { const [y, m] = v.split('-'); return `${m}/${y.slice(2)}` }}
+              />
               <YAxis
                 tick={{ fill: '#64748b', fontSize: 11 }}
                 tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}

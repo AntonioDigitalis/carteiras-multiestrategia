@@ -7,7 +7,24 @@ const router = Router()
 // GET /api/external/fundo/:cnpj
 router.get('/fundo/:cnpj', async (req, res) => {
   try {
-    const data = await buscarFundoAnbima(req.params.cnpj)
+    const cnpj = req.params.cnpj
+    const digits = cnpj.replace(/\D/g, '')
+
+    // 1. Busca no banco local — resolve fundos já cadastrados em qualquer carteira
+    const db = getDb()
+    const local = db.prepare(`
+      SELECT nome FROM produtos
+      WHERE tipo = 'fundo'
+        AND replace(replace(replace(replace(identificador,'.',''),'/',''),'-',''),' ','') = ?
+      LIMIT 1
+    `).get(digits)
+    if (local?.nome) {
+      const fmt = `${digits.slice(0,2)}.${digits.slice(2,5)}.${digits.slice(5,8)}/${digits.slice(8,12)}-${digits.slice(12,14)}`
+      return res.json({ cnpj: fmt, nome: local.nome, classe: null, source: 'local' })
+    }
+
+    // 2. Fallback: cadastral CVM
+    const data = await buscarFundoAnbima(cnpj)
     res.json(data)
   } catch (e) {
     res.status(404).json({ error: e.message })
