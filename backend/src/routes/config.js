@@ -128,9 +128,9 @@ router.post('/importar', (req, res) => {
       for (const p of data.produtos ?? []) {
         db.prepare(`
           INSERT OR REPLACE INTO produtos
-            (id, estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(p.id, p.estado_id, p.tipo, p.classe, p.nome, p.identificador, p.peso, p.indexador, p.tipo_cdi, p.taxa, p.data_emissao, p.data_vencimento, p.created_at)
+            (id, estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(p.id, p.estado_id, p.tipo, p.classe, p.nome, p.identificador, p.peso, p.indexador, p.tipo_cdi, p.taxa, p.data_emissao, p.data_vencimento, p.isento_ir ?? 0, p.created_at)
       }
 
       // Inserir cotas (merge ignora duplicatas)

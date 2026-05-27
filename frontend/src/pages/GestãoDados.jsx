@@ -190,7 +190,9 @@ function FormularioMes({ carteiraId, mes, onSave }) {
             alternativos: 0,
           }
         )
-        setEstados(ests.length > 0 ? ests : [{ id: null, inicio: mes + '-01', fim: null, produtos: [] }])
+        setEstados(ests.length > 0
+          ? ests.map((e) => ({ ...e, inicio: e.data_inicio, fim: e.data_fim }))
+          : [{ id: null, inicio: mes + '-01', fim: null, produtos: [] }])
         setTabEstado(0)
       })
       .catch(setError)
@@ -297,25 +299,33 @@ function FormularioMes({ carteiraId, mes, onSave }) {
         </div>
 
         {/* Tab de estados */}
-        {estados.length > 1 && (
-          <div className="flex gap-2 mb-3">
-            {estados.map((e, i) => (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {estados.map((e, i) => {
+            const fmtData = (d) => d ? format(parseISO(d), 'dd/MM/yyyy') : null
+            const inicio = fmtData(e.inicio)
+            const fim = fmtData(e.fim)
+            return (
               <button
                 key={i}
                 onClick={() => setTabEstado(i)}
                 className={clsx(
-                  'text-xs px-3 py-1 rounded',
+                  'text-xs px-3 py-1.5 rounded flex flex-col items-start gap-0.5',
                   tabEstado === i
                     ? 'bg-accent-blue text-white'
                     : 'bg-bg-tertiary text-slate-400 hover:text-slate-200'
                 )}
               >
-                Estado {i + 1}
-                {e.inicio && <span className="ml-1 opacity-60">{e.inicio}</span>}
+                <span className="font-medium">Estado {i + 1}</span>
+                <span className={clsx('font-mono', tabEstado === i ? 'text-blue-100' : 'text-slate-500')}>
+                  {inicio ?? '—'} → {fim ?? 'aberto'}
+                </span>
               </button>
-            ))}
-          </div>
-        )}
+            )
+          })}
+          {estados.length === 0 && (
+            <span className="text-xs text-slate-600 italic">Nenhum estado cadastrado</span>
+          )}
+        </div>
 
         {estados[tabEstado] && (
           <EstadoProdutos
@@ -354,7 +364,7 @@ function FormularioMes({ carteiraId, mes, onSave }) {
 
 function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
   const [showForm, setShowForm] = useState(false)
-  const [novoProduto, setNovoProduto] = useState({ tipo: 'fundo', nome: '', identificador: '', peso: 0, classe: 'pos_fixado' })
+  const [novoProduto, setNovoProduto] = useState({ tipo: 'fundo', nome: '', identificador: '', peso: 0, classe: 'pos_fixado', isento_ir: false })
   const [buscando, setBuscando] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -364,7 +374,7 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
 
   function startEdit(p) {
     setEditingId(p.id)
-    setEditValues({ identificador: p.identificador || '', peso: p.peso ?? 0, nome: p.nome || '' })
+    setEditValues({ identificador: p.identificador || '', peso: p.peso ?? 0, nome: p.nome || '', isento_ir: !!p.isento_ir })
   }
 
   async function salvarEdicao(produtoId) {
@@ -425,8 +435,24 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
       })
     : []
 
+  const fmtData = (d) => d ? format(parseISO(d), "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : null
+  const inicioFmt = fmtData(estado.inicio)
+  const fimFmt = fmtData(estado.fim)
+
   return (
     <div className="space-y-3">
+      {/* Vigência em destaque */}
+      <div className="flex items-center gap-2 bg-bg-tertiary rounded-md px-3 py-2 border border-border/60">
+        <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium shrink-0">Vigência</span>
+        <span className="text-xs text-slate-200 font-medium">
+          {inicioFmt ?? <span className="text-slate-600 italic">não definida</span>}
+        </span>
+        <span className="text-slate-600 text-xs">→</span>
+        <span className="text-xs text-slate-300">
+          {fimFmt ?? <span className="text-accent-green font-medium">em aberto</span>}
+        </span>
+      </div>
+
       {/* Datas */}
       <div className="flex gap-3 text-xs">
         <div>
@@ -486,15 +512,28 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
                       </td>
                       <td className="py-1 text-slate-500 text-xs">{CLASSES[p.classe] || p.classe}</td>
                       <td className="py-1 text-right">
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="100"
-                          className="input text-xs py-0.5 w-20 text-right font-mono"
-                          value={editValues.peso}
-                          onChange={(e) => setEditValues({ ...editValues, peso: parseFloat(e.target.value) || 0 })}
-                        />
+                        <div className="flex flex-col items-end gap-1">
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="100"
+                            className="input text-xs py-0.5 w-20 text-right font-mono"
+                            value={editValues.peso}
+                            onChange={(e) => setEditValues({ ...editValues, peso: parseFloat(e.target.value) || 0 })}
+                          />
+                          {p.tipo === 'rf_curva' && (
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={!!editValues.isento_ir}
+                                onChange={(e) => setEditValues({ ...editValues, isento_ir: e.target.checked })}
+                                className="accent-accent-blue w-3 h-3"
+                              />
+                              <span className="text-[10px] text-slate-400">Isento IR</span>
+                            </label>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1 text-right">
                         <div className="flex justify-end gap-1">
@@ -510,12 +549,21 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
                   ) : (
                     <>
                       <td className="py-1.5 text-slate-300 font-medium">
-                        <div>{p.nome}</div>
+                        <div className="flex items-center gap-1.5">
+                          {p.nome}
+                          {p.isento_ir ? (
+                            <span className="text-[9px] font-medium bg-emerald-900/30 text-emerald-400 border border-emerald-700/30 rounded px-1.5 py-0.5 shrink-0">
+                              Isento IR
+                            </span>
+                          ) : null}
+                        </div>
                         {p.identificador && <div className="text-[10px] text-slate-500 font-mono">{p.identificador}</div>}
                       </td>
                       <td className="py-1.5 text-slate-500">
                         {p.tipo === 'carteira' ? (
                           <span className="text-[10px] bg-blue-900/20 text-accent-blue border border-blue-800/30 rounded px-1.5 py-0.5">carteira composta</span>
+                        ) : p.tipo === 'rf_curva' ? (
+                          <span className="text-[10px]">RF curva</span>
                         ) : p.tipo}
                       </td>
                       <td className="py-1.5 text-slate-500">{CLASSES[p.classe] || p.classe}</td>
@@ -814,6 +862,26 @@ function CamposRFCurva({ produto, onChange }) {
           </select>
         </div>
       )}
+
+      {/* Isenção de IR */}
+      <label className="flex items-start gap-2.5 cursor-pointer group">
+        <input
+          type="checkbox"
+          checked={!!produto.isento_ir}
+          onChange={(e) => onChange({ ...produto, isento_ir: e.target.checked })}
+          className="mt-0.5 accent-accent-blue w-3.5 h-3.5 shrink-0"
+        />
+        <div>
+          <span className="text-xs text-slate-200 group-hover:text-white transition-colors">
+            Isento de IR
+          </span>
+          <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+            LCI, LCA, CRI, CRA ou debênture incentivada (Lei 12.431).
+            O retorno será apresentado em termos brutos equivalentes
+            (÷ 0,85) para comparação justa com produtos tributáveis.
+          </p>
+        </div>
+      </label>
     </div>
   )
 }

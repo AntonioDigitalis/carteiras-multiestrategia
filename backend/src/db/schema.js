@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS estados_portfolio (
 CREATE TABLE IF NOT EXISTS produtos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   estado_id INTEGER NOT NULL REFERENCES estados_portfolio(id) ON DELETE CASCADE,
-  tipo TEXT NOT NULL CHECK(tipo IN ('fundo', 'acao', 'rf_curva')),
+  tipo TEXT NOT NULL CHECK(tipo IN ('fundo', 'acao', 'rf_curva', 'carteira')),
   classe TEXT NOT NULL CHECK(classe IN ('pos_fixado', 'inflacao', 'prefixado', 'rf_global', 'multimercado', 'rv_brasil', 'rv_global', 'fundos_listados', 'alternativos')),
   nome TEXT NOT NULL,
   identificador TEXT,            -- CNPJ para fundos, ticker para ações
@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS produtos (
   taxa REAL,                     -- % CDI, spread a.a. ou taxa prefixada a.a.
   data_emissao TEXT,
   data_vencimento TEXT,
+  isento_ir INTEGER NOT NULL DEFAULT 0, -- 1 = isento IR (LCI/LCA/CRI/CRA/Deb. incentivada)
   created_at TEXT DEFAULT (datetime('now'))
 );
 

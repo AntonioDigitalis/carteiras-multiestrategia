@@ -19,22 +19,23 @@ router.post('/:estadoId/produtos', (req, res) => {
   const {
     tipo, classe, nome, identificador,
     peso, indexador, tipo_cdi, taxa,
-    data_emissao, data_vencimento,
+    data_emissao, data_vencimento, isento_ir,
   } = req.body
 
-  if (!['fundo', 'acao', 'rf_curva'].includes(tipo)) {
+  if (!['fundo', 'acao', 'rf_curva', 'carteira'].includes(tipo)) {
     return res.status(400).json({ error: 'Tipo inválido' })
   }
 
   const result = db.prepare(`
     INSERT INTO produtos
-      (estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.params.estadoId, tipo, classe, nome,
     identificador || null, peso || 0,
     indexador || null, tipo_cdi || null, taxa || null,
     data_emissao || null, data_vencimento || null,
+    isento_ir ? 1 : 0,
   )
 
   const created = db.prepare('SELECT * FROM produtos WHERE id = ?').get(result.lastInsertRowid)
@@ -47,7 +48,7 @@ router.put('/:id', async (req, res) => {
   const {
     tipo, classe, nome, identificador,
     peso, indexador, tipo_cdi, taxa,
-    data_emissao, data_vencimento,
+    data_emissao, data_vencimento, isento_ir,
   } = req.body
 
   const anterior = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id)
@@ -57,12 +58,13 @@ router.put('/:id', async (req, res) => {
     UPDATE produtos SET
       tipo = ?, classe = ?, nome = ?, identificador = ?,
       peso = ?, indexador = ?, tipo_cdi = ?, taxa = ?,
-      data_emissao = ?, data_vencimento = ?
+      data_emissao = ?, data_vencimento = ?, isento_ir = ?
     WHERE id = ?
   `).run(
     tipo, classe, nome, identificador || null,
     peso || 0, indexador || null, tipo_cdi || null, taxa || null,
     data_emissao || null, data_vencimento || null,
+    isento_ir ? 1 : 0,
     req.params.id,
   )
 

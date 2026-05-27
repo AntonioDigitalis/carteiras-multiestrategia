@@ -15,6 +15,46 @@ if (!fs.existsSync(DATA_DIR)) {
 let db
 
 function runMigrations(db) {
+  // Migração: adicionar isento_ir em produtos
+  const colsProdutos = db.pragma('table_info(produtos)').map((c) => c.name)
+  if (!colsProdutos.includes('isento_ir')) {
+    db.exec('ALTER TABLE produtos ADD COLUMN isento_ir INTEGER NOT NULL DEFAULT 0')
+    console.log('[DB] Migração: adicionado isento_ir em produtos.')
+  }
+
+  // Migração: adicionar tipo='carteira' ao CHECK constraint de produtos
+  const prodSql = db.prepare("SELECT sql FROM sqlite_master WHERE name='produtos'").get()?.sql ?? ''
+  if (!prodSql.includes("'carteira'")) {
+    console.log('[DB] Migrando CHECK constraint de produtos para incluir tipo=carteira...')
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE produtos_carteira_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        estado_id INTEGER NOT NULL REFERENCES estados_portfolio(id) ON DELETE CASCADE,
+        tipo TEXT NOT NULL CHECK(tipo IN ('fundo', 'acao', 'rf_curva', 'carteira')),
+        classe TEXT NOT NULL CHECK(classe IN (
+          'pos_fixado','inflacao','prefixado','rf_global','multimercado',
+          'rv_brasil','rv_global','fundos_listados','alternativos'
+        )),
+        nome TEXT NOT NULL,
+        identificador TEXT,
+        peso REAL NOT NULL DEFAULT 0,
+        indexador TEXT CHECK(indexador IN ('CDI', 'IPCA', 'PRE', NULL)),
+        tipo_cdi TEXT CHECK(tipo_cdi IN ('pct', 'spread', NULL)),
+        taxa REAL,
+        data_emissao TEXT,
+        data_vencimento TEXT,
+        isento_ir INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO produtos_carteira_new SELECT * FROM produtos;
+      DROP TABLE produtos;
+      ALTER TABLE produtos_carteira_new RENAME TO produtos;
+    `)
+    db.pragma('foreign_keys = ON')
+    console.log('[DB] Migração tipo=carteira concluída.')
+  }
+
   const cols = db.pragma('table_info(alocacoes_macro)').map((c) => c.name)
 
   // Migração: esquema antigo (rf_pos, rf_ipca...) → novo (pos_fixado, inflacao...)

@@ -114,8 +114,11 @@ function calcularFatorCDI(diasCDI, taxaCDIAnual) {
 
 // ── RF Marcada na Curva ────────────────────────────────────
 
+// Alíquota IR de longo prazo (> 720 dias) usada para o gross-up de isentos
+const ALIQUOTA_IR_LP = 0.15
+
 export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
-  const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento } = produto
+  const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = produto
   const db = getDb()
 
   const inicio = dataInicio > data_emissao ? dataInicio : data_emissao
@@ -123,52 +126,46 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
 
   if (inicio >= fim) return 0
 
+  let retorno = 0
+
   if (indexador === 'PRE') {
     const dias = diasEntre(inicio, fim)
-    const taxaAA = taxa / 100
-    return Math.pow(1 + taxaAA, dias / 252) - 1
-  }
+    retorno = Math.pow(1 + taxa / 100, dias / 252) - 1
 
-  if (indexador === 'CDI') {
+  } else if (indexador === 'CDI') {
     const cdiRows = getCDIDiarioLocal(inicio, fim)
     if (cdiRows.length === 0) {
-      // fallback: usar taxa CDI anual média estimada (12% a.a.)
       const dias = diasEntre(inicio, fim)
       if (tipo_cdi === 'pct') {
-        const cdiEstimado = 0.12
-        const fator = calcularFatorCDI(dias, cdiEstimado * 100)
-        return (Math.pow(fator, taxa / 100) - 1)
+        retorno = Math.pow(calcularFatorCDI(dias, 0.12 * 100), taxa / 100) - 1
       } else {
-        const taxaAnual = (0.12 + taxa / 100)
-        return Math.pow(1 + taxaAnual, dias / 252) - 1
+        retorno = Math.pow(1 + 0.12 + taxa / 100, dias / 252) - 1
       }
+    } else {
+      let fator = 1
+      for (const row of cdiRows) {
+        const cdiDiario = row.valor / 100
+        if (tipo_cdi === 'pct') {
+          fator *= (1 + cdiDiario * (taxa / 100))
+        } else {
+          fator *= (1 + cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1)
+        }
+      }
+      retorno = fator - 1
     }
 
-    let fator = 1
-    for (const row of cdiRows) {
-      const cdiDiario = row.valor / 100  // já em % a.d.
-      if (tipo_cdi === 'pct') {
-        fator *= (1 + cdiDiario * (taxa / 100))
-      } else {
-        const spreadDiario = Math.pow(1 + taxa / 100, 1 / 252) - 1
-        fator *= (1 + cdiDiario + spreadDiario)
-      }
-    }
-    return fator - 1
-  }
-
-  if (indexador === 'IPCA') {
+  } else if (indexador === 'IPCA') {
     const ipcaRows = getIPCAMensalLocal(inicio.slice(0, 7), fim.slice(0, 7))
     const dias = diasEntre(inicio, fim)
     let fatorIPCA = 1
-    for (const row of ipcaRows) {
-      fatorIPCA *= (1 + row.valor / 100)
-    }
-    const fatorSpread = Math.pow(1 + taxa / 100, dias / 252)
-    return fatorIPCA * fatorSpread - 1
+    for (const row of ipcaRows) fatorIPCA *= (1 + row.valor / 100)
+    retorno = fatorIPCA * Math.pow(1 + taxa / 100, dias / 252) - 1
   }
 
-  return 0
+  // Gross-up: converte retorno isento em equivalente bruto tributável para
+  // comparação justa com CDBs e fundos (que pagam IR sobre o rendimento)
+  if (isento_ir) return retorno / (1 - ALIQUOTA_IR_LP)
+  return retorno
 }
 
 // ── Retorno de produto por período ────────────────────────
@@ -373,6 +370,20 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
   const inicioMes = `${mes}-01`
   const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
   const totalDias = diasEntre(inicioMes, fimMes) + 1
+
+  // Se o primeiro estado começa depois do dia 1, preenche o gap com o estado
+  // mais recente do mês anterior (convenção do 7º dia útil).
+  if (estados[0].data_inicio > inicioMes) {
+    const anterior = db.prepare(
+      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes < ? ORDER BY mes DESC, data_inicio DESC LIMIT 1`
+    ).get(carteiraId, mes)
+    if (anterior) {
+      const diaAntes = new Date(estados[0].data_inicio + 'T12:00:00')
+      diaAntes.setDate(diaAntes.getDate() - 1)
+      const gapFim = diaAntes.toISOString().split('T')[0]
+      estados = [{ ...anterior, data_inicio: inicioMes, data_fim: gapFim }, ...estados]
+    }
+  }
 
   let retornoMes = 1
 
