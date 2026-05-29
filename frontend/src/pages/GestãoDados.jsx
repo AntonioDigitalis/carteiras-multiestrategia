@@ -367,7 +367,7 @@ function FormularioMes({ carteiraId, mes, onSave }) {
 
 function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
   const [showForm, setShowForm] = useState(false)
-  const [novoProduto, setNovoProduto] = useState({ tipo: 'fundo', nome: '', identificador: '', peso: 0, classe: 'pos_fixado', isento_ir: false })
+  const [novoProduto, setNovoProduto] = useState({ tipo: 'fundo', nome: '', identificador: '', peso: 0, classe: 'pos_fixado', isento_ir: false, duration_manual: null })
   const [saving, setSaving] = useState(false)
   const [savingDates, setSavingDates] = useState(false)
   const [datesSaved, setDatesSaved] = useState(false)
@@ -846,6 +846,29 @@ function FormNovoProduto({ produto, onChange, onSave, onCancel, saving, carteira
             onChange={(e) => onChange({ ...produto, nome: e.target.value })}
             placeholder="Nome do produto"
             className="input text-xs"
+          />
+        </div>
+      )}
+
+      {produto.tipo !== 'carteira' && (
+        <div>
+          <label className="label">
+            Duration (anos, opcional)
+            {produto.tipo === 'rf_curva' && (
+              <span className="text-slate-500 font-normal ml-1">— override do cálculo automático</span>
+            )}
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            value={produto.duration_manual ?? ''}
+            onChange={(e) => {
+              const v = e.target.value
+              onChange({ ...produto, duration_manual: v === '' ? null : parseFloat(v) })
+            }}
+            placeholder={produto.tipo === 'rf_curva' ? 'Calculado automaticamente' : 'ex: 3.5'}
+            className="input text-xs w-40"
           />
         </div>
       )}

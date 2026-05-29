@@ -100,10 +100,12 @@ function diasEntre(d1, d2) {
   return Math.round((new Date(d2) - new Date(d1)) / 86400000)
 }
 
-// Duration modificada (anos) de um instrumento rf_curva bullet.
-// CDI-indexados (taxa flutuante): duration efetiva ≈ 0.
-// PRE e IPCA (bullet, sem cupom intermediário): MD = anos / (1 + taxa_aa).
+// Duration modificada (anos). Valor manual tem precedência sobre o cálculo automático.
+// Para rf_curva: CDI flutuante → 0; PRE/IPCA bullet → anos / (1 + taxa_aa).
+// Para outros tipos (acao, fundo): apenas duration_manual é usado.
 export function calcularDurationRF(produto, dataRef) {
+  if (produto.duration_manual != null) return Number(produto.duration_manual)
+
   if (produto.tipo !== 'rf_curva') return null
   const { indexador, taxa, data_vencimento } = produto
   if (!data_vencimento) return null
@@ -1397,6 +1399,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
             tipo_cdi: p.tipo_cdi,
             taxa: p.taxa,
             data_vencimento: p.data_vencimento,
+            duration_manual: p.duration_manual,
           }
         }
         const a = acumAtivo[ativoKey]
@@ -1405,6 +1408,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         a.tipo_cdi = p.tipo_cdi
         a.taxa = p.taxa
         a.data_vencimento = p.data_vencimento
+        a.duration_manual = p.duration_manual
         if (ret != null) {
           a.retorno_acum *= (1 + ret)
           a.contribuicao_total += ret * pesoNorm * pesoClasse
@@ -1440,6 +1444,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       tipo_cdi: a.tipo_cdi,
       taxa: a.taxa,
       data_vencimento: a.data_vencimento,
+      duration_manual: a.duration_manual,
     }, hoje)
     ativosPorClasse[a.classe].push({
       nome: a.nome,
