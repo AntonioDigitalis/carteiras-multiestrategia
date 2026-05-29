@@ -6,10 +6,10 @@ const router = Router()
 // PUT /api/estados/:id
 router.put('/:id', (req, res) => {
   const db = getDb()
-  const { data_inicio, data_fim } = req.body
+  const { data_inicio, data_fim, notas } = req.body
   db.prepare(
-    'UPDATE estados_portfolio SET data_inicio = ?, data_fim = ? WHERE id = ?'
-  ).run(data_inicio, data_fim || null, req.params.id)
+    'UPDATE estados_portfolio SET data_inicio = ?, data_fim = ?, notas = ? WHERE id = ?'
+  ).run(data_inicio, data_fim || null, notas ?? null, req.params.id)
   res.json({ ok: true })
 })
 

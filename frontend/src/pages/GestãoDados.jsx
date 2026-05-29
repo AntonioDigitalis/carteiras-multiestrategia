@@ -315,7 +315,10 @@ function FormularioMes({ carteiraId, mes, onSave }) {
                     : 'bg-bg-tertiary text-slate-400 hover:text-slate-200'
                 )}
               >
-                <span className="font-medium">Estado {i + 1}</span>
+                <span className="font-medium flex items-center gap-1">
+                  Estado {i + 1}
+                  {e.notas && <span title={e.notas} className={clsx('text-[9px]', tabEstado === i ? 'text-blue-200' : 'text-slate-500')}>💬</span>}
+                </span>
                 <span className={clsx('font-mono', tabEstado === i ? 'text-blue-100' : 'text-slate-500')}>
                   {inicio ?? '—'} → {fim ?? 'aberto'}
                 </span>
@@ -415,7 +418,7 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
     if (!estado.id) return
     setSavingDates(true)
     try {
-      await api.atualizarEstado(estado.id, { data_inicio: estado.inicio, data_fim: estado.fim || null })
+      await api.atualizarEstado(estado.id, { data_inicio: estado.inicio, data_fim: estado.fim || null, notas: estado.notas || null })
       setDatesSaved(true)
       setTimeout(() => setDatesSaved(false), 2500)
     } catch (e) {
@@ -511,6 +514,18 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
             Datas serão salvas ao adicionar o primeiro produto
           </span>
         )}
+      </div>
+
+      {/* Comentários / Motivo das alterações */}
+      <div>
+        <label className="label">Comentários (opcional)</label>
+        <textarea
+          rows={2}
+          placeholder="Motivo das alterações neste período…"
+          value={estado.notas || ''}
+          onChange={(e) => { onUpdate({ ...estado, notas: e.target.value }); setDatesSaved(false) }}
+          className="input text-xs py-1.5 w-full resize-none"
+        />
       </div>
 
       {/* Filtro */}
