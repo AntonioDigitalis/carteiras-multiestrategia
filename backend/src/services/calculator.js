@@ -772,6 +772,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
 
   return {
     retorno_acumulado: retornoAcumulado,
+    retorno_acumulado_cdi: retornoAcumuladoCDI,
     retorno_vs_cdi: retornoAcumulado - retornoAcumuladoCDI,
     retorno_vs_cdi_pct: retornoAcumuladoCDI > 0 ? retornoAcumulado / retornoAcumuladoCDI : null,
     cagr,
