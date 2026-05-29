@@ -390,7 +390,6 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
   const [ano, m] = mes.split('-').map(Number)
   const inicioMes = `${mes}-01`
   const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
-  const totalDias = diasEntre(inicioMes, fimMes) + 1
 
   // Se o primeiro estado começa depois do dia 1, preenche o gap com o estado
   // mais recente do mês anterior (convenção do 7º dia útil).
@@ -412,17 +411,15 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
     const est = estados[i]
     const inicio = est.data_inicio > inicioMes ? est.data_inicio : inicioMes
     const fim = est.data_fim && est.data_fim < fimMes ? est.data_fim : fimMes
-    const diasEst = diasEntre(inicio, fim) + 1
 
     const produtos = db.prepare(
       `SELECT p.* FROM produtos p WHERE p.estado_id = ?`
     ).all(est.id)
 
     const retEst = calcularRetornoEstado({ alocacao }, produtos, inicio, fim)
-    const peso = diasEst / totalDias
 
-    // Ponderação por dias corridos
-    retornoMes += retEst * peso
+    // Composição sequencial dos estados: cada estado rende em cima do anterior
+    retornoMes *= (1 + retEst)
   }
 
   return retornoMes - 1
