@@ -1188,10 +1188,28 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const toWeightMap = (p) =>
     classesAtivas.reduce((o, cls, i) => ({ ...o, [cls]: p.weights[i] }), {})
 
+  // Paridade de risco (Equal Risk Contribution) — algoritmo iterativo
+  // Cada classe contribui igualmente para a variância total do portfólio.
+  const pesosRP = (() => {
+    let w = Array(n).fill(1 / n)
+    for (let iter = 0; iter < 300; iter++) {
+      // Contribuição marginal ao risco: (Σ·w)_i
+      const mrc = w.map((_, i) => w.reduce((s, wj, j) => s + cov[i][j] * wj, 0))
+      const totalVar = w.reduce((s, wi, i) => s + wi * mrc[i], 0)
+      if (totalVar <= 0) break
+      // Novos pesos proporcionais à contribuição-alvo / contribuição-atual
+      const newW = w.map((wi, i) => mrc[i] > 0 ? wi * Math.sqrt(1 / (n * wi * mrc[i] / totalVar)) : wi)
+      const sum = newW.reduce((a, b) => a + b, 0)
+      w = newW.map(v => v / sum)
+    }
+    return w
+  })()
+
   return {
     fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
     max_sharpe: { weights: toWeightMap(maxSharpe), vol: maxSharpe.vol, cagr: maxSharpe.cagr, sharpe: maxSharpe.sharpe },
     min_vol: { weights: toWeightMap(minVol), vol: minVol.vol, cagr: minVol.cagr, sharpe: minVol.sharpe },
+    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
     atual: { weights: toWeightMap({ weights: pesosAtuais }), ...currentStats },
     classes: classesAtivas,
     labels: classesAtivas.map((cls) => LABELS_CLASSE[cls]),

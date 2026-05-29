@@ -639,7 +639,7 @@ const LABELS_CLASSE_FE = {
   alternativos:    'Alternativos',
 }
 
-const CORES_OTIMIZADOR = { max_sharpe: '#22c55e', min_vol: '#f59e0b', atual: '#3b82f6' }
+const CORES_OTIMIZADOR = { max_sharpe: '#22c55e', min_vol: '#f59e0b', paridade_risco: '#a855f7', atual: '#3b82f6' }
 
 const LABELS_CLASSE_OT = {
   pos_fixado: 'Pós-fixado', inflacao: 'Inflação', prefixado: 'Pré-fixado',
@@ -713,9 +713,12 @@ function OtimizadorMacro({ carteiraId, period }) {
             <p className="text-xs text-slate-500 mb-4">Cada ponto representa um portfólio simulado. Os portfólios ótimos estão destacados.</p>
             <FronteiraChart resultado={resultado} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <PesosCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} classes={resultado.classes} labels={resultado.labels} />
             <PesosCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} classes={resultado.classes} labels={resultado.labels} />
+            {resultado.paridade_risco && (
+              <PesosCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} classes={resultado.classes} labels={resultado.labels} />
+            )}
           </div>
           <div className="card overflow-x-auto">
             <div className="text-sm font-medium text-slate-300 mb-4">Comparação de Portfólios</div>
@@ -726,6 +729,7 @@ function OtimizadorMacro({ carteiraId, period }) {
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.atual }}>Atual</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.max_sharpe }}>Máx. Sharpe</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.min_vol }}>Mín. Vol.</th>
+                  {resultado.paridade_risco && <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>Par. Risco</th>}
                 </tr>
               </thead>
               <tbody>
@@ -739,6 +743,7 @@ function OtimizadorMacro({ carteiraId, period }) {
                     <td className="py-2 text-right font-mono text-slate-300">{fmt(resultado.atual[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-green">{fmt(resultado.max_sharpe[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-yellow">{fmt(resultado.min_vol[key]) ?? '—'}</td>
+                    {resultado.paridade_risco && <td className="py-2 text-right font-mono" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>{fmt(resultado.paridade_risco[key]) ?? '—'}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -990,6 +995,7 @@ function FronteiraChart({ resultado }) {
     { label: '● Atual', vol: +(atual.vol * 100).toFixed(3), cagr: +(atual.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.atual },
     { label: '● Máx. Sharpe', vol: +(max_sharpe.vol * 100).toFixed(3), cagr: +(max_sharpe.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.max_sharpe },
     { label: '● Mín. Vol.', vol: +(min_vol.vol * 100).toFixed(3), cagr: +(min_vol.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.min_vol },
+    ...(resultado.paridade_risco ? [{ label: '● Par. Risco', vol: +(resultado.paridade_risco.vol * 100).toFixed(3), cagr: +(resultado.paridade_risco.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.paridade_risco }] : []),
   ]
 
   return (
