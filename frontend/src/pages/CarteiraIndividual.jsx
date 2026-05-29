@@ -137,17 +137,20 @@ function OverviewTab({ metricas }) {
           value={fmtPct(m.cagr)}
           subtitle="Retorno anualizado"
           trend={m.cagr}
+          tooltip="Compound Annual Growth Rate — taxa de retorno anualizada equivalente ao período selecionado. Permite comparar carteiras com históricos de tamanhos diferentes."
         />
         <MetricCard
           title="Volatilidade"
           value={fmtPct(m.volatilidade)}
           subtitle="Anualizada"
+          tooltip="Desvio padrão dos retornos mensais, anualizado (× √12). Mede a dispersão dos resultados em torno da média — quanto maior, mais imprevisível a rentabilidade mensal."
         />
         <MetricCard
           title="Sharpe"
           value={m.sharpe?.toFixed(2)}
           trend={m.sharpe}
           subtitle="vs CDI"
+          tooltip="Retorno excedente ao CDI dividido pela volatilidade. Mede o quanto de retorno extra a carteira entrega por unidade de risco assumido. Acima de 0 = melhor que CDI ajustado ao risco."
         />
       </div>
 
@@ -215,16 +218,21 @@ function OverviewTab({ metricas }) {
             <MetricRow label="Melhor mês" value={fmtPct(m.melhor_mes)} highlight={1} />
             <MetricRow label="Pior mês" value={fmtPct(m.pior_mes)} highlight={-1} />
             <MetricRow label="% Meses positivos" value={m.pct_meses_positivos != null ? `${(m.pct_meses_positivos * 100).toFixed(0)}%` : '—'} />
-            <MetricRow label="vs CDI (acum.)" value={fmtPct(m.retorno_vs_cdi)} highlight={m.retorno_vs_cdi} />
-            <MetricRow label="% do CDI" value={m.retorno_vs_cdi_pct != null ? `${(m.retorno_vs_cdi_pct * 100).toFixed(1)}%` : '—'} />
+            <MetricRow label="vs CDI (acum.)" value={fmtPct(m.retorno_vs_cdi)} highlight={m.retorno_vs_cdi}
+              tooltip="Diferença absoluta entre o retorno acumulado da carteira e o CDI no período (em pontos percentuais). Positivo = superou o CDI." />
+            <MetricRow label="% do CDI" value={m.retorno_vs_cdi_pct != null ? `${(m.retorno_vs_cdi_pct * 100).toFixed(1)}%` : '—'}
+              tooltip="Retorno da carteira expresso como proporção do CDI no mesmo período. Ex: 90% CDI = a carteira rendeu 90% do que o CDI rendeu. Acima de 100% = superou o CDI." />
           </div>
         </div>
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-3">Risco</div>
           <div className="space-y-0.5">
-            <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1} />
-            <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino} />
-            <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar} />
+            <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+              tooltip="Maior queda percentual do pico ao vale registrada no período. Mede o pior cenário de perda que um investidor poderia ter sofrido." />
+            <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+              tooltip="Variação do Sharpe que penaliza apenas a volatilidade negativa (retornos abaixo do CDI). Mais relevante que o Sharpe quando as perdas são a principal preocupação." />
+            <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+              tooltip="CAGR dividido pelo módulo do Max Drawdown. Mede o retorno anualizado obtido por cada ponto percentual de risco máximo assumido. Quanto maior, melhor." />
             <MetricRow label="Início MDD" value={m.mdd_inicio ?? '—'} />
             <MetricRow label="Fim MDD" value={m.mdd_fim ?? '—'} />
           </div>
@@ -313,13 +321,20 @@ function RiscoTab({ metricas }) {
     <div className="grid grid-cols-2 gap-4">
       <div className="card space-y-0.5">
         <div className="text-sm font-medium text-slate-300 mb-3">Métricas de Risco</div>
-        <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)} />
-        <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1} />
-        <MetricRow label="Duração MDD (dias)" value={m.mdd_duracao ?? '—'} />
-        <MetricRow label="Recuperação (dias)" value={m.mdd_recuperacao ?? 'N/A'} />
-        <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe} />
-        <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino} />
-        <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar} />
+        <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
+          tooltip="Desvio padrão dos retornos mensais, anualizado (× √12). Mede a dispersão dos resultados em torno da média — quanto maior, mais imprevisível a rentabilidade." />
+        <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+          tooltip="Maior queda percentual do pico ao vale registrada no período. Mede o pior cenário de perda que um investidor poderia ter sofrido." />
+        <MetricRow label="Duração MDD (meses)" value={m.mdd_duracao ?? '—'}
+          tooltip="Número de meses desde o pico até o fundo do maior drawdown. Indica por quanto tempo a carteira ficou em queda contínua." />
+        <MetricRow label="Recuperação (meses)" value={m.mdd_recuperacao ?? 'N/A'}
+          tooltip="Número de meses para recuperar o patamar anterior ao maior drawdown. Não disponível se a recuperação ainda não ocorreu no período." />
+        <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
+          tooltip="Retorno excedente ao CDI dividido pela volatilidade total (positiva e negativa). Mede eficiência por unidade de risco total. Acima de 0 = melhor que CDI ajustado ao risco." />
+        <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+          tooltip="Como o Sharpe, mas usa apenas a volatilidade negativa (downside deviation). Penaliza somente as oscilações para baixo, ignorando a volatilidade positiva." />
+        <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+          tooltip="CAGR dividido pelo módulo do Max Drawdown. Responde: quantos % de retorno anual a carteira entrega para cada % de queda máxima suportada." />
       </div>
     </div>
   )
