@@ -87,8 +87,23 @@ router.get('/saude', (req, res) => {
       const macroMes = macro.find((m) => m.mes === r.mes)
       status = macroMes?.cdi ? 'ok' : 'sem_macro'
       nota = 'Usa dados macro'
+    } else if (r.tipo === 'carteira') {
+      // Sub-carteiras têm retorno calculado dinamicamente — não precisam de cotas externas
+      status = 'ok'
+      nota = 'Retorno calculado dinamicamente'
     } else {
-      n_cotas = db.prepare('SELECT COUNT(*) as n FROM cotas_cache WHERE produto_id=?').get(r.id).n
+      // Busca cotas por identificador (CNPJ ou ticker), não por produto_id individual.
+      // O calculador também faz isso, então um único produto sincronizado cobre todos os estados.
+      const ident = r.identificador || null
+      if (ident) {
+        n_cotas = db.prepare(
+          `SELECT COUNT(*) as n FROM cotas_cache cc
+           JOIN produtos p2 ON cc.produto_id = p2.id
+           WHERE p2.identificador = ?`
+        ).get(ident).n
+      } else {
+        n_cotas = db.prepare('SELECT COUNT(*) as n FROM cotas_cache WHERE produto_id=?').get(r.id).n
+      }
       status = n_cotas > 0 ? 'ok' : 'sem_cotas'
     }
     prodMap.get(key).periodos.push({ mes: r.mes, produto_id: r.id, n_cotas, status, nota })
@@ -229,12 +244,18 @@ function verificarAlocacoes(db) {
       }
 
       // 2. Micro por classe != macro
-      const produtos = db.prepare(`
+      // Usa apenas o estado mais recente do mês (maior data_inicio) para evitar
+      // dupla-contagem quando há rebalanceamento intra-mês.
+      const ultimoEstado = db.prepare(
+        `SELECT id FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio DESC LIMIT 1`
+      ).get(carteira_id, mes)
+
+      const produtos = ultimoEstado ? db.prepare(`
         SELECT p.classe, SUM(p.peso) AS total_micro
-        FROM produtos p JOIN estados_portfolio ep ON p.estado_id = ep.id
-        WHERE ep.carteira_id = ? AND ep.mes = ?
+        FROM produtos p
+        WHERE p.estado_id = ?
         GROUP BY p.classe
-      `).all(carteira_id, mes)
+      `).all(ultimoEstado.id) : []
 
       if (aloc && produtos.length > 0) {
         const microPorClasse = {}
@@ -253,9 +274,17 @@ function verificarAlocacoes(db) {
             const micro = (microPorClasse[k] || 0).toFixed(1)
             return `${k}: macro ${macro}% ≠ produtos ${micro}%`
           }).join('; ')
-          insStmt.run('alocacao_micro', tituloMicro,
-            `${label}: ${desc}`,
-            ativo, hoje, 'alocacao_micro', ativo, tituloMicro)
+          // Atualiza descrição se alerta já existe, ou cria novo
+          const existente = db.prepare(
+            `SELECT id FROM alertas_auditoria WHERE categoria='alocacao_micro' AND ativo=? AND titulo=? AND status='ativo'`
+          ).get(ativo, tituloMicro)
+          if (existente) {
+            db.prepare(`UPDATE alertas_auditoria SET descricao=?, data=?, updated_at=datetime('now') WHERE id=?`)
+              .run(`${label}: ${desc}`, hoje, existente.id)
+          } else {
+            db.prepare(`INSERT INTO alertas_auditoria (tipo, categoria, titulo, descricao, ativo, data, status) VALUES ('warning',?,?,?,?,?,'ativo')`)
+              .run(tituloMicro, `${label}: ${desc}`, ativo, hoje)
+          }
         } else {
           db.prepare(`UPDATE alertas_auditoria SET status='revisado', updated_at=datetime('now')
             WHERE categoria='alocacao_micro' AND ativo=? AND titulo=? AND status='ativo'`

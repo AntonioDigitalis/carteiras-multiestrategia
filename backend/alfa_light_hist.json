@@ -1,0 +1,1507 @@
+{
+  "carteira": "alfa_light",
+  "tipo": "A",
+  "periodos": [
+    {
+      "data": "2025-06-10",
+      "elaboracao": null,
+      "alteracoes": null,
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 17.5,
+            "pre_fixada": 0.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 17.5 }
+            ],
+            "pre_fixada": [],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.0,
+            "inflacao": 27.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 35.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 2.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro", "cnpj": "22.963.439/0001-52", "peso": 3.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 15.0,
+            "inflacao": 32.5,
+            "pre_fixada": 2.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 32.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 2.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 7.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro", "cnpj": "22.963.439/0001-52", "peso": 7.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-07-09",
+      "elaboracao": "Camila Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": null,
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 17.5,
+            "pre_fixada": 0.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.705.938/0001-65", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 17.5 }
+            ],
+            "pre_fixada": [],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.0,
+            "inflacao": 27.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.705.938/0001-65", "peso": 35.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 2.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro", "cnpj": "22.963.439/0001-52", "peso": 3.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 15.0,
+            "inflacao": 32.5,
+            "pre_fixada": 2.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.705.938/0001-65", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 32.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 2.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 7.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro", "cnpj": "22.963.439/0001-52", "peso": 7.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-08-11",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": null,
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 15.0,
+            "pre_fixada": 2.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 15.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 2.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.0,
+            "inflacao": 25.0,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 35.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 25.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 2.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 15.0,
+            "inflacao": 30.0,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 30.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 7.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 4.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-09-09",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": "Não houve alterações na composição dos ativos em nenhuma das três carteiras.",
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 15.0,
+            "pre_fixada": 2.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 15.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 2.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.0,
+            "inflacao": 25.0,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 35.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 25.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 2.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 15.0,
+            "inflacao": 30.0,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "45.823.918/0001-79", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "34.475.424/0001-24", "peso": 30.0 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "55.630.600/0001-25", "peso": 7.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "47.033.348/0001-49", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 4.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-10-09",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": "Aumento de +2,5 p.p. em Renda Fixa Prefixada com redução proporcional em Renda Fixa Inflação em todas as carteiras, antecipando o ciclo de queda de juros.",
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.0,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 35.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 2.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 15.0,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 7.5 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 4.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-11-11",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": {
+        "conservadora": "Nenhuma alteração realizada.",
+        "moderada": "Aumento de +2,5 p.p. em Renda Variável Brasil com redução proporcional em Renda Fixa Pós-Fixada. Motivação: comportamento historicamente positivo dos ativos de risco em períodos que antecedem ciclos de queda de juros + fundamentos sólidos das empresas.",
+        "sofisticada": "Aumento de +2,5 p.p. em Renda Variável Brasil com redução proporcional em Renda Fixa Pós-Fixada. Motivação: comportamento historicamente positivo dos ativos de risco em períodos que antecedem ciclos de queda de juros + fundamentos sólidos das empresas."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 32.5,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 7.5,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 32.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 3.75 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 3.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 12.5,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 17.5,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 12.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 8.75 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 8.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 4.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2025-12-11",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá — Research XP",
+      "alteracoes": {
+        "conservadora": "Nenhuma mudança realizada.",
+        "moderada": "Aumento de +2,5 p.p. em Renda Variável Brasil com redução proporcional em Renda Fixa Pós-Fixada. Motivação: comportamento historicamente positivo dos ativos de risco em períodos que antecedem ciclos de queda de juros + fundamentos sólidos das empresas.",
+        "sofisticada": "Aumento de +2,5 p.p. em Renda Variável Brasil com redução proporcional em Renda Fixa Pós-Fixada. Motivação: comportamento historicamente positivo dos ativos de risco em períodos que antecedem ciclos de queda de juros + fundamentos sólidos das empresas."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 70.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 30.0,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 10.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 30.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 3.75 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 3.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 10.0,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 20.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 10.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Crédito Global FIF M RL", "cnpj": "44.835.930/0001-30", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Dividendos Brasil FIA", "cnpj": "31.638.229/0001-02", "peso": 10.0 },
+              { "nome": "Trend Qualidade Brasil FIA", "cnpj": "36.255.217/0001-50", "peso": 10.0 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 4.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 3.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2026-01-12",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá (CNPI 10162) — Research XP",
+      "alteracoes": {
+        "conservadora": "Inclusão dos fundos Selection RF Light FIC FIRF CP LP e Selection Debêntures Incentivadas FIC FIM CP na classe RF Pós-Fixada, aumentando exposição cautelosa a crédito privado de forma diversificada e seletiva.",
+        "moderada": "Inclusão dos fundos Selection RF Light FIC FIRF CP LP e Selection Debêntures Incentivadas FIC FIM CP na classe RF Pós-Fixada. Substituição do Trend Valor Brasil pelo Trend Momentum Brasil FIA RL em RV Brasil, aproveitando o modelo quantitativo de momentum e o cenário de expectativa de queda de juros no Brasil em 2026.",
+        "sofisticada": "Inclusão dos fundos Selection RF Light FIC FIRF CP LP e Selection Debêntures Incentivadas FIC FIM CP na classe RF Pós-Fixada. Substituição do Trend Valor Brasil pelo Trend Momentum Brasil FIA RL em RV Brasil, aproveitando o modelo quantitativo de momentum e o cenário de expectativa de queda de juros no Brasil em 2026."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 35.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 20.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "HYBR11", "cnpj": "47.005.475/0001-86", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 32.5,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 7.5,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 22.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 6.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 4.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "HYBR11", "cnpj": "47.005.475/0001-86", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 3.75 },
+              { "nome": "Trend Momentum Brasil FIA RL", "cnpj": "47.083.245/0001-01", "peso": 3.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 12.5,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 17.5,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 7.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 3.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 2.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "HYBR11", "cnpj": "47.005.475/0001-86", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 8.75 },
+              { "nome": "Trend Momentum Brasil FIA RL", "cnpj": "47.083.245/0001-01", "peso": 8.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "XFIX11", "cnpj": "36.046.508/0001-78", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 5.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 2.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2026-02-10",
+      "elaboracao": "Camilla Dolle (CNPI 7129) & Rachel de Sá (CNPI 10162) — Research XP",
+      "alteracoes": {
+        "todas": "Fundos Listados: Substituição do ETF XFIX11 pelo Trend IFIX FIF Investimento — mantém a mesma exposição ao índice de FIIs, porém com maior simplicidade tributária por ser fundo aberto. Renda Fixa Global: Substituição do HYBR11 pelo Trend Fixed Income US Target Duration FIFM IE — fundo com objetivo de otimizar o perfil risco-retorno ajustando a duration da carteira conforme expectativas de mercado, além de unificar estruturas e simplificar tributação."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 70.0,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 5.0,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 35.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 20.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 15.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 5.0 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 32.5,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 16.5,
+            "renda_variavel_brasil": 7.5,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 2.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 22.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 6.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 4.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 16.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 3.75 },
+              { "nome": "Trend Momentum Brasil FIA RL", "cnpj": "47.083.245/0001-01", "peso": 3.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 2.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 12.5,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 12.5,
+            "renda_variavel_brasil": 17.5,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 8.0,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 7.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 3.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 2.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 12.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 8.75 },
+              { "nome": "Trend Momentum Brasil FIA RL", "cnpj": "47.083.245/0001-01", "peso": 8.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 8.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 5.0 },
+              { "nome": "Trend Inteligência Artificial CIA RL", "cnpj": "44.431.925/0001-62", "peso": 2.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2026-04-13",
+      "elaboracao": "Rachel de Sá (CNPI 10162) · Mayara Rodrigues · Raphael Figueredo — Research XP",
+      "alteracoes": {
+        "conservadora": "Redução de -2,5 p.p. em Multimercados, realocados integralmente para RF Pós-Fixada (otimização risco/retorno).",
+        "moderada": "Redução de -2,5 p.p. em Multimercados, realocados para Fundos Listados e Renda Variável Global. Substituição do Trend Momentum Brasil FIA RL pelo Trend Dividendos Brasil FIA RL em RV Brasil. Substituição do Trend Inteligência Artificial CIA RL pelo Trend Commodities FIF RL em Alternativos.",
+        "sofisticada": "Redução de -2,5 p.p. em Multimercados, realocados para Fundos Listados e Renda Variável Global. Substituição do Trend Momentum Brasil FIA RL pelo Trend Dividendos Brasil FIA RL em RV Brasil. Substituição do Trend Inteligência Artificial CIA RL pelo Trend Commodities FIF RL em Alternativos."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 72.5,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 2.5,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 35.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 20.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 17.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 2.5 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 32.5,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 14.0,
+            "renda_variavel_brasil": 7.5,
+            "renda_variavel_global": 4.0,
+            "fundos_listados": 4.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 22.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 6.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 4.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 14.0 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 3.75 },
+              { "nome": "Trend Dividendos Brasil FIA RL", "cnpj": "31.638.229/0001-02", "peso": 3.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 4.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 4.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Commodities FIF RL", "cnpj": "54.170.559/0001-90", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 12.5,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 9.5,
+            "renda_variavel_brasil": 17.5,
+            "renda_variavel_global": 6.0,
+            "fundos_listados": 9.5,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash FIRF Simples", "cnpj": "26.708.431/0001-10", "peso": 7.0 },
+              { "nome": "Selection RF Light FIC FIRF CP LP", "cnpj": "41.287.689/0001-00", "peso": 3.0 },
+              { "nome": "Selection Debêntures Incentivadas FIC FIM CP", "cnpj": "36.639.004/0001-55", "peso": 2.5 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Selection Multimercado FIC FIM", "cnpj": "24.582.449/0001-73", "peso": 9.5 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "Trend Qualidade Brasil FIA RL", "cnpj": "36.255.217/0001-50", "peso": 8.75 },
+              { "nome": "Trend Dividendos Brasil FIA RL", "cnpj": "31.638.229/0001-02", "peso": 8.75 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 6.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 9.5 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 5.0 },
+              { "nome": "Trend Commodities FIF RL", "cnpj": "54.170.559/0001-90", "peso": 2.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "data": "2026-05-12",
+      "elaboracao": "Rachel de Sá (CNPI 10162) · Mayara Rodrigues · Raphael Figueredo — Research XP",
+      "alteracoes": {
+        "conservadora": "Substituição do Selection Debêntures Incentivadas FIC FIM CP por GICP11, do Selection RF Light FIC FIRF CP LP por LTBX11 e do Selection Multimercado FIC FIM por Genoa Capital Radar Advisory FIC FIM. Mesma classe de ativos e estratégias semelhantes preservadas. Pesos da RF Pós-Fixada mantidos em 72,5%.",
+        "moderada": "Substituição do Selection Debêntures Incentivadas FIC FIM CP por GICP11 e do Selection RF Light FIC FIRF CP LP por LTBX11 na RF Pós-Fixada. Substituição do Selection Multimercado FIC FIM por Genoa Capital Radar Advisory FIC FIM. Substituição do Trend Qualidade Brasil FIA RL e Trend Dividendos Brasil FIA RL por PIBB11 e XP Dividendos FIA. Redução tática de risco: RV Brasil -2,5 p.p., RV Global -0,5 p.p., RF Pós-Fixada (Trend Cash) +3,0 p.p.",
+        "sofisticada": "Substituição do Selection Debêntures Incentivadas FIC FIM CP por GICP11 e do Selection RF Light FIC FIRF CP LP por LTBX11 na RF Pós-Fixada. Substituição do Selection Multimercado FIC FIM por Genoa Capital Radar Advisory FIC FIM. Substituição do Trend Qualidade Brasil FIA RL e Trend Dividendos Brasil FIA RL por PIBB11 e XP Dividendos FIA. Redução tática de risco: RV Brasil -2,5 p.p., RV Global -1,0 p.p., RF Pós-Fixada (Trend Cash) +3,5 p.p."
+      },
+      "perfis": {
+        "conservadora": {
+          "alocacao_macro": {
+            "pos_fixada": 72.5,
+            "inflacao": 12.5,
+            "pre_fixada": 5.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 2.5,
+            "renda_variavel_brasil": 0.0,
+            "renda_variavel_global": 2.5,
+            "fundos_listados": 2.5,
+            "alternativos": 0.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash CIC de Classes RF Simples RL", "cnpj": "26.708.431/0001-10", "peso": 35.0 },
+              { "nome": "GICP11", "cnpj": "55.428.959/0001-88", "peso": 17.5 },
+              { "nome": "LTBX11", "cnpj": "53.316.742/0001-09", "peso": 20.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 12.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 5.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Genoa Capital Radar Advisory FIC FIM", "cnpj": "28.212.946/0001-44", "peso": 2.5 }
+            ],
+            "renda_variavel_brasil": [],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 2.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 2.5 }
+            ],
+            "alternativos": []
+          }
+        },
+        "moderada": {
+          "alocacao_macro": {
+            "pos_fixada": 35.5,
+            "inflacao": 22.5,
+            "pre_fixada": 10.0,
+            "renda_fixa_global": 2.5,
+            "multimercados": 14.0,
+            "renda_variavel_brasil": 5.0,
+            "renda_variavel_global": 3.5,
+            "fundos_listados": 4.0,
+            "alternativos": 3.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash CIC de Classes RF Simples RL", "cnpj": "26.708.431/0001-10", "peso": 25.0 },
+              { "nome": "GICP11", "cnpj": "55.428.959/0001-88", "peso": 4.5 },
+              { "nome": "LTBX11", "cnpj": "53.316.742/0001-09", "peso": 6.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 22.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 10.0 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Genoa Capital Radar Advisory FIC FIM", "cnpj": "28.212.946/0001-44", "peso": 14.0 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "PIBB11", "cnpj": "04.820.949/0001-07", "peso": 2.5 },
+              { "nome": "XP Dividendos FIA", "cnpj": "13.290.882/0001-43", "peso": 2.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 3.5 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 4.0 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 2.0 },
+              { "nome": "Trend Commodities FIF RL", "cnpj": "54.170.559/0001-90", "peso": 1.0 }
+            ]
+          }
+        },
+        "sofisticada": {
+          "alocacao_macro": {
+            "pos_fixada": 16.0,
+            "inflacao": 27.5,
+            "pre_fixada": 7.5,
+            "renda_fixa_global": 2.5,
+            "multimercados": 10.0,
+            "renda_variavel_brasil": 15.0,
+            "renda_variavel_global": 5.0,
+            "fundos_listados": 9.5,
+            "alternativos": 7.0
+          },
+          "produtos": {
+            "pos_fixada": [
+              { "nome": "Trend Cash CIC de Classes RF Simples RL", "cnpj": "26.708.431/0001-10", "peso": 10.5 },
+              { "nome": "GICP11", "cnpj": "55.428.959/0001-88", "peso": 2.5 },
+              { "nome": "LTBX11", "cnpj": "53.316.742/0001-09", "peso": 3.0 }
+            ],
+            "inflacao": [
+              { "nome": "Trend Inflação Geral FIRF", "cnpj": "32.604.675/0001-16", "peso": 27.5 }
+            ],
+            "pre_fixada": [
+              { "nome": "Trend Pré-Fixado FIRF LP", "cnpj": "31.145.851/0001-56", "peso": 7.5 }
+            ],
+            "renda_fixa_global": [
+              { "nome": "Trend Fixed Income US Target Duration FIFM IE", "cnpj": "47.332.898/0001-40", "peso": 2.5 }
+            ],
+            "multimercados": [
+              { "nome": "Genoa Capital Radar Advisory FIC FIM", "cnpj": "28.212.946/0001-44", "peso": 10.0 }
+            ],
+            "renda_variavel_brasil": [
+              { "nome": "PIBB11", "cnpj": "04.820.949/0001-07", "peso": 7.5 },
+              { "nome": "XP Dividendos FIA", "cnpj": "13.290.882/0001-43", "peso": 7.5 }
+            ],
+            "renda_variavel_global": [
+              { "nome": "Trend Bolsas Globais FIF M RL", "cnpj": "37.553.464/0001-35", "peso": 5.0 }
+            ],
+            "fundos_listados": [
+              { "nome": "Trend IFIX FIF Investimento", "cnpj": "44.974.587/0001-22", "peso": 9.5 }
+            ],
+            "alternativos": [
+              { "nome": "Trend Ouro FIF M RL", "cnpj": "22.963.439/0001-52", "peso": 5.0 },
+              { "nome": "Trend Commodities FIF RL", "cnpj": "54.170.559/0001-90", "peso": 2.0 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

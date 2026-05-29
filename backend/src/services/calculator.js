@@ -242,7 +242,7 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
   }
 
   // Tickers renomeados que compartilham o mesmo histórico de preços
-  const TICKER_ALIASES = { 'CVBI11': 'PCIP11', 'PCIP11': 'CVBI11' }
+  const TICKER_ALIASES = { 'CVBI11': 'PCIP11', 'PCIP11': 'CVBI11', 'AXIA7': 'AXIA3' }
   const alias = TICKER_ALIASES[produto.identificador]
   const identifiers = alias ? [produto.identificador, alias] : [produto.identificador]
   const placeholders = identifiers.map(() => '?').join(', ')
