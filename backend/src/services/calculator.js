@@ -378,18 +378,20 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
     `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
   ).all(carteiraId, mes)
 
-  // Mês ainda não configurado — usa o estado aberto mais recente (data_fim IS NULL)
-  if (estados.length === 0) {
-    estados = db.prepare(
-      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes <= ? AND data_fim IS NULL ORDER BY mes DESC`
-    ).all(carteiraId, mes)
-    // Só estende se o estado imediatamente anterior for o mês passado (portfolio contínuo)
-    if (estados.length === 0) return null
-  }
-
   const [ano, m] = mes.split('-').map(Number)
   const inicioMes = `${mes}-01`
   const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
+
+  // Mês sem estado próprio: procura estados que cobrem esse mês por data
+  // (ex: estado de fev com data_fim em abr cobre março inteiro)
+  if (estados.length === 0) {
+    estados = db.prepare(
+      `SELECT * FROM estados_portfolio
+       WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+       ORDER BY data_inicio`
+    ).all(carteiraId, fimMes, inicioMes)
+    if (estados.length === 0) return null
+  }
 
   // Se o primeiro estado começa depois do dia 1, preenche o gap com o estado
   // mais recente do mês anterior (convenção do 7º dia útil).
@@ -428,9 +430,24 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
 // ── Alocações macro com extensão automática para meses não configurados ────
 
 function getAlocacoesExtendidas(db, perfilId, carteiraId, mesInicioStr, mesFimStr) {
-  const alocacoes = db.prepare(
+  const raw = db.prepare(
     `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
   ).all(perfilId, mesInicioStr, mesFimStr)
+
+  // Preenche gaps internos: se um mês está faltando, carrega a alocação do mês anterior
+  const alocacoes = []
+  for (let i = 0; i < raw.length; i++) {
+    alocacoes.push(raw[i])
+    if (i < raw.length - 1) {
+      let [y, m] = raw[i].mes.split('-').map(Number)
+      while (true) {
+        m++; if (m > 12) { m = 1; y++ }
+        const prox = `${y}-${String(m).padStart(2, '0')}`
+        if (prox >= raw[i + 1].mes) break
+        alocacoes.push({ ...raw[i], mes: prox })
+      }
+    }
+  }
 
   // Estende para meses além do último configurado se o portfolio tiver estado aberto
   const estadoAberto = db.prepare(
