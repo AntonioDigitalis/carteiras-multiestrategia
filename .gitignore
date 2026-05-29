@@ -1,9 +1,10 @@
 # Dependências
 node_modules/
 
-# Banco de dados (dados financeiros reais — nunca versionar)
-**/*.db
-backend/data/
+# Banco de dados — commitar só o principal, ignorar arquivos WAL/SHM
+*.db-shm
+*.db-wal
+# backend/data/  ← descomentado para versionamento do banco
 
 # Build do frontend
 frontend/dist/
