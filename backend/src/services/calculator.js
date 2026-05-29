@@ -18,7 +18,7 @@ const BENCHMARKS_PASSIVA = {
   inflacao:        'IMA-B (IMAB11)',
   prefixado:       'IRF-M (IRFM11)',
   rf_global:       'AGG + Hedge BRL',
-  multimercado:    'CDI + 2,0% a.a. (proxy IHFA)',
+  multimercado:    'IHFA',
   rv_brasil:       'Ibovespa',
   rv_global:       'ACWI + Hedge BRL',
   fundos_listados: 'IFIX',
@@ -54,6 +54,8 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
   }
 
   if (cls === 'multimercado') {
+    const ihfa = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IHFA_MENSAL' AND data=?`).get(mesData)
+    if (ihfa) return ihfa.valor / 100
     return cdiMensal + (Math.pow(1 + SPREADS_FALLBACK_AA.multimercado.spread, 1 / 12) - 1)
   }
 

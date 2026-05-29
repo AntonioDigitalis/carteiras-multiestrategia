@@ -13,7 +13,107 @@ const _yf = new YahooFinance({
 
 const BCB_BASE = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs'
 const BRAPI_BASE = 'https://brapi.dev/api'
-const ANBIMA_BASE = 'https://data.anbima.com.br'
+const ANBIMA_API_BASE = 'https://api.anbima.com.br'
+
+function getAnbimaCredentials() {
+  try {
+    const db = getDb()
+    const id  = db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'anbima_client_id'`).get()
+    const sec = db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'anbima_client_secret'`).get()
+    if (id?.valor && sec?.valor) return { clientId: id.valor, clientSecret: sec.valor }
+  } catch (_) {}
+  return null
+}
+
+// OAuth2 client-credentials token (ANBIMA open API)
+let _anbimaToken = null
+let _anbimaTokenExpiry = 0
+
+async function getAnbimaToken(creds) {
+  if (_anbimaToken && Date.now() < _anbimaTokenExpiry - 60000) return _anbimaToken
+  const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64')
+  const res = await fetch(`${ANBIMA_API_BASE}/oauth/access-token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+    signal: AbortSignal.timeout(10000),
+  })
+  if (!res.ok) throw new Error(`ANBIMA OAuth: HTTP ${res.status}`)
+  const data = await res.json()
+  _anbimaToken = data.access_token
+  _anbimaTokenExpiry = Date.now() + (data.expires_in ?? 3600) * 1000
+  return _anbimaToken
+}
+
+export async function fetchIHFAMensal(dataInicio, dataFim) {
+  const creds = getAnbimaCredentials()
+  if (!creds) return 0
+
+  const db = getDb()
+  const mesInicio = dataInicio.slice(0, 7) + '-01'
+  const mesFim    = dataFim.slice(0, 7) + '-01'
+
+  // Precisa do mês anterior para calcular retorno do primeiro mês
+  const dAntes = new Date(dataInicio)
+  dAntes.setMonth(dAntes.getMonth() - 1)
+  const fetchStart = dAntes.toISOString().split('T')[0]
+
+  const fmt = (iso) => iso.split('-').reverse().join('/')
+  const url = `${ANBIMA_API_BASE}/feed/fundos/v1/indices/ihfa?dataInicio=${fmt(fetchStart)}&dataFim=${fmt(dataFim)}`
+
+  try {
+    const token = await getAnbimaToken(creds)
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) throw new Error(`ANBIMA IHFA: HTTP ${res.status}`)
+    const data = await res.json()
+
+    // Resposta: array de { data: 'DD/MM/YYYY', numero_indice: float }
+    const pontos = (data?.ihfa ?? data ?? [])
+      .map((p) => ({
+        data: p.data.split('/').reverse().join('-'),
+        valor: parseFloat(p.numero_indice ?? p.valor),
+      }))
+      .filter((p) => !isNaN(p.valor))
+      .sort((a, b) => a.data.localeCompare(b.data))
+
+    if (pontos.length < 2) return 0
+
+    // Agrupa por mês (último valor do mês = nível do índice no fechamento)
+    const porMes = {}
+    for (const p of pontos) {
+      const mes = p.data.slice(0, 7)
+      porMes[mes] = p.valor
+    }
+
+    const meses = Object.keys(porMes).sort()
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO dados_macro (serie, data, valor, fonte) VALUES ('IHFA_MENSAL', ?, ?, 'ANBIMA')`
+    )
+    let inseridos = 0
+    db.transaction(() => {
+      for (let i = 1; i < meses.length; i++) {
+        const mesData = meses[i] + '-01'
+        if (mesData < mesInicio || mesData > mesFim) continue
+        const retorno = (porMes[meses[i]] / porMes[meses[i - 1]] - 1) * 100
+        stmt.run(mesData, retorno)
+        inseridos++
+      }
+    })()
+
+    registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', inseridos, 'ok', null)
+    return inseridos
+  } catch (e) {
+    registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', null, 'erro', e.message)
+    console.warn('[ANBIMA] Falha ao buscar IHFA:', e.message)
+    return 0
+  }
+}
 
 async function fetchJSON(url, opts = {}) {
   const controller = new AbortController()
@@ -674,6 +774,20 @@ export async function garantirDadosMacro(dataInicio, dataFim) {
       await fetchIndicesMercado(dataInicio, dataFim)
     } catch (e) {
       console.warn('[external] Não foi possível buscar índices de mercado:', e.message)
+    }
+  }
+
+  // IHFA — benchmark real de multimercado (requer credenciais ANBIMA)
+  if (getAnbimaCredentials()) {
+    const existentesIHFA = db.prepare(
+      `SELECT COUNT(*) as c FROM dados_macro WHERE serie = 'IHFA_MENSAL' AND data >= ? AND data <= ?`
+    ).get(mesInicio, mesFim)
+    if (existentesIHFA.c === 0) {
+      try {
+        await fetchIHFAMensal(dataInicio, dataFim)
+      } catch (e) {
+        console.warn('[external] Não foi possível buscar IHFA:', e.message)
+      }
     }
   }
 }
