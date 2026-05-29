@@ -1111,8 +1111,22 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
   if (!carteira) return null
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+
+  // Garante pelo menos 12 meses de histórico para que a covariância seja estável.
+  // Se o período selecionado for menor, recua até o início da carteira (ou 24 meses).
+  const primeiroEstado = db.prepare(
+    `SELECT MIN(data_inicio) as d FROM estados_portfolio WHERE carteira_id = ?`
+  ).get(carteiraId)
+  const inicioPossivel = primeiroEstado?.d?.slice(0, 7) ?? '2020-01'
+
+  const inicio12m = (() => {
+    const d = new Date((mesFimStr + '-01'))
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  // Usa o mais recente entre: 24 meses atrás e o início da carteira; ignorando o período selecionado
+  const mesInicioStr = inicioPossivel > inicio12m ? inicioPossivel : inicio12m
 
   const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
   const cdiMedioMensal = cdiRows.length > 0
@@ -1191,8 +1205,19 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
 export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000) {
   const db = getDb()
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+
+  // Igual ao otimizador macro: usa sempre pelo menos 24 meses de histórico
+  const primeiroEstado = db.prepare(
+    `SELECT MIN(data_inicio) as d FROM estados_portfolio WHERE carteira_id = ?`
+  ).get(carteiraId)
+  const inicioPossivel = primeiroEstado?.d?.slice(0, 7) ?? '2020-01'
+  const inicio24m = (() => {
+    const d = new Date(mesFimStr + '-01')
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  const mesInicioStr = inicioPossivel > inicio24m ? inicioPossivel : inicio24m
 
   // Meses com estados configurados no período (inclui mês corrente via estado aberto)
   const mesesConfigurados = db.prepare(
