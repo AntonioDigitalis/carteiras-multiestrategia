@@ -773,7 +773,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   return {
     retorno_acumulado: retornoAcumulado,
     retorno_vs_cdi: retornoAcumulado - retornoAcumuladoCDI,
-    retorno_vs_cdi_pct: retornoAcumuladoCDI > 0 ? acumulado / acumuladoCDI - 1 + 1 : null,
+    retorno_vs_cdi_pct: retornoAcumuladoCDI > 0 ? retornoAcumulado / retornoAcumuladoCDI : null,
     cagr,
     volatilidade,
     sharpe,

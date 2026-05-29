@@ -130,9 +130,9 @@ function CarteiraCard({ carteira, period }) {
           />
           <MetricLine
             label="vs CDI"
-            value={metricas.retorno_vs_cdi != null ? `${fmtPct(metricas.retorno_vs_cdi_pct)} CDI` : '—'}
-            positive={metricas.retorno_vs_cdi > 0}
-            negative={metricas.retorno_vs_cdi < 0}
+            value={metricas.retorno_vs_cdi_pct != null ? `${(metricas.retorno_vs_cdi_pct * 100).toFixed(1)}% CDI` : '—'}
+            positive={metricas.retorno_vs_cdi_pct > 1}
+            negative={metricas.retorno_vs_cdi_pct != null && metricas.retorno_vs_cdi_pct < 1}
           />
           <MetricLine label="Volatilidade" value={fmtPct(vol)} />
           <MetricLine
