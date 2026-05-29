@@ -1,0 +1,4 @@
+# Banco de dados — arquivo binário grande, não ler
+backend/data/carteiras.db
+backend/data/*.db-shm
+backend/data/*.db-wal
