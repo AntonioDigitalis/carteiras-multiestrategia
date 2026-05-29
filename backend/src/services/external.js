@@ -302,7 +302,7 @@ function getWeekdays(dataInicio, dataFim) {
   return days
 }
 
-async function fetchHistoricoB3(ticker, dataInicio, dataFim) {
+export async function fetchHistoricoB3(ticker, dataInicio, dataFim) {
   // Limit B3 daily bulletins to last 30 days — disk cache makes repeated syncs fast
   const limitDate = new Date(Date.now() - 30 * 24 * 3600000).toISOString().split('T')[0]
   const efetivo = dataInicio > limitDate ? dataInicio : limitDate
@@ -365,7 +365,7 @@ async function fetchCotahistAnual(year) {
   return byTicker
 }
 
-async function fetchHistoricoB3Cotahist(ticker, dataInicio, dataFim) {
+export async function fetchHistoricoB3Cotahist(ticker, dataInicio, dataFim) {
   const anoInicio = parseInt(dataInicio.slice(0, 4))
   const anoFim    = parseInt(dataFim.slice(0, 4))
   const result    = []
