@@ -758,44 +758,47 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     : 0
   const sortino = downDev > 0 ? (cagr - retornoAcumuladoCDI / anos) / downDev : null
 
-  // Max Drawdown
-  let pico = 1
-  let navAtual = 1
-  let maxDD = 0
-  let mddInicio = null
-  let mddFim = null
-  let mddPicoData = null
-  let emDrawdown = false
-
-  for (const { mes, retorno } of retornosMensais) {
-    navAtual *= (1 + retorno)
-    if (navAtual > pico) {
-      pico = navAtual
-      mddPicoData = mes
-      emDrawdown = false
-    }
-    const dd = navAtual / pico - 1
-    if (dd < maxDD) {
-      maxDD = dd
-      mddFim = mes
-      mddInicio = mddPicoData
-    }
-  }
-
-  const calmar = maxDD < 0 ? cagr / Math.abs(maxDD) : null
-
-  // Série diária: fonte de verdade para retorno_acumulado e CDI
-  // (começa exatamente em inicioStr, não no início do mês)
+  // Série diária: fonte de verdade para retorno_acumulado, CDI, Max Drawdown
   const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
   const ultimoDiario = serieDiaria?.at(-1)
 
-  const retornoFinal     = ultimoDiario?.retorno_acumulado ?? retornoAcumulado
-  const retornoCDIFinal  = ultimoDiario?.cdi_acumulado     ?? retornoAcumuladoCDI
+  const retornoFinal    = ultimoDiario?.retorno_acumulado ?? retornoAcumulado
+  const retornoCDIFinal = ultimoDiario?.cdi_acumulado     ?? retornoAcumuladoCDI
 
   // CAGR recalculado pelo número real de dias úteis da série
   const cagrFinal = serieDiaria?.length > 0
     ? Math.pow(1 + retornoFinal, 252 / serieDiaria.length) - 1
     : cagr
+
+  // Max Drawdown calculado a partir da série diária (captura quedas intra-mês)
+  let maxDD = 0
+  let mddInicio = null
+  let mddFim = null
+  let picoDiario = -Infinity
+  let picoData = null
+  if (serieDiaria?.length > 0) {
+    for (const { data, retorno_acumulado } of serieDiaria) {
+      if (retorno_acumulado > picoDiario) { picoDiario = retorno_acumulado; picoData = data }
+      const dd = (1 + retorno_acumulado) / (1 + picoDiario) - 1
+      if (dd < maxDD) { maxDD = dd; mddInicio = picoData; mddFim = data }
+    }
+  } else {
+    // Fallback mensal
+    let pico = 1, navAtual = 1, picoMes = null
+    for (const { mes, retorno } of retornosMensais) {
+      navAtual *= (1 + retorno)
+      if (navAtual > pico) { pico = navAtual; picoMes = mes }
+      const dd = navAtual / pico - 1
+      if (dd < maxDD) { maxDD = dd; mddFim = mes; mddInicio = picoMes }
+    }
+  }
+
+  // mdd_duracao em dias úteis
+  const mddDuracao = mddInicio && mddFim && serieDiaria
+    ? serieDiaria.findIndex(p => p.data === mddFim) - serieDiaria.findIndex(p => p.data >= mddInicio)
+    : null
+
+  const calmar = maxDD < 0 ? cagrFinal / Math.abs(maxDD) : null
 
   return {
     retorno_acumulado: retornoFinal,
@@ -810,7 +813,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     max_drawdown: maxDD,
     mdd_inicio: mddInicio,
     mdd_fim: mddFim,
-    mdd_duracao: mddInicio && mddFim ? retornosMensais.findIndex(r => r.mes === mddFim) - retornosMensais.findIndex(r => r.mes === mddInicio) : null,
+    mdd_duracao: mddDuracao,
     melhor_mes: Math.max(...retornos),
     pior_mes: Math.min(...retornos),
     pct_meses_positivos: retornos.filter((r) => r > 0).length / retornos.length,
