@@ -784,12 +784,25 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
 
   const calmar = maxDD < 0 ? cagr / Math.abs(maxDD) : null
 
+  // Série diária: fonte de verdade para retorno_acumulado e CDI
+  // (começa exatamente em inicioStr, não no início do mês)
+  const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
+  const ultimoDiario = serieDiaria?.at(-1)
+
+  const retornoFinal     = ultimoDiario?.retorno_acumulado ?? retornoAcumulado
+  const retornoCDIFinal  = ultimoDiario?.cdi_acumulado     ?? retornoAcumuladoCDI
+
+  // CAGR recalculado pelo número real de dias úteis da série
+  const cagrFinal = serieDiaria?.length > 0
+    ? Math.pow(1 + retornoFinal, 252 / serieDiaria.length) - 1
+    : cagr
+
   return {
-    retorno_acumulado: retornoAcumulado,
-    retorno_acumulado_cdi: retornoAcumuladoCDI,
-    retorno_vs_cdi: retornoAcumulado - retornoAcumuladoCDI,
-    retorno_vs_cdi_pct: retornoAcumuladoCDI > 0 ? retornoAcumulado / retornoAcumuladoCDI : null,
-    cagr,
+    retorno_acumulado: retornoFinal,
+    retorno_acumulado_cdi: retornoCDIFinal,
+    retorno_vs_cdi: retornoFinal - retornoCDIFinal,
+    retorno_vs_cdi_pct: retornoCDIFinal > 0 ? retornoFinal / retornoCDIFinal : null,
+    cagr: cagrFinal,
     volatilidade,
     sharpe,
     sortino,
@@ -803,7 +816,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     pct_meses_positivos: retornos.filter((r) => r > 0).length / retornos.length,
     retornos_mensais: retornosMensais,
     serie_retorno: serieRetorno,
-    serie_retorno_diaria: calcularSerieDiaria(carteiraId, inicioStr, fimStr),
+    serie_retorno_diaria: serieDiaria,
     n_meses: retornosMensais.length,
   }
 }
