@@ -325,6 +325,12 @@ function RiscoTab({ metricas }) {
   )
 }
 
+function fmtDur(d) {
+  if (d == null) return '—'
+  if (d === 0) return '0,0 a'
+  return `${d.toFixed(1).replace('.', ',')} a`
+}
+
 function AtribuicaoTab({ carteiraId, period }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -357,6 +363,7 @@ function AtribuicaoTab({ carteiraId, period }) {
             <tr className="text-slate-500 border-b border-border">
               <th className="text-left pb-2 font-medium pl-2">Classe / Ativo</th>
               <th className="text-right pb-2 font-medium">Peso</th>
+              <th className="text-right pb-2 font-medium" title="Duration modificada dos ativos de RF (anos). CDI flutuante = 0.">Duration RF</th>
               <th className="text-right pb-2 font-medium">Retorno</th>
               <th className="text-right pb-2 font-medium">vs Benchmark</th>
               <th className="text-right pb-2 font-medium">Contribuição</th>
@@ -385,6 +392,9 @@ function AtribuicaoTab({ carteiraId, period }) {
                       {cl.nome}
                     </td>
                     <td className="py-2 text-right text-slate-400 font-mono">{fmtPct(cl.peso)}</td>
+                    <td className="py-2 text-right font-mono text-slate-300">
+                      {fmtDur(cl.duration_media_rf)}
+                    </td>
                     <td className={clsx('py-2 text-right font-mono font-semibold', cl.retorno >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {fmtPct(cl.retorno)}
                     </td>
@@ -417,6 +427,9 @@ function AtribuicaoTab({ carteiraId, period }) {
                         <div>{fmtPct(at.peso_portfolio)}</div>
                         <div className="text-slate-600">{fmtPct(at.peso_classe)} na classe</div>
                       </td>
+                      <td className="py-1.5 text-right font-mono text-[11px] text-slate-400">
+                        {fmtDur(at.duration)}
+                      </td>
                       <td className={clsx('py-1.5 text-right font-mono text-[11px]', at.retorno >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                         {fmtPct(at.retorno)}
                       </td>
@@ -434,7 +447,7 @@ function AtribuicaoTab({ carteiraId, period }) {
           </tbody>
         </table>
         <div className="mt-3 text-[10px] text-slate-600">
-          Clique em uma classe para expandir e ver os ativos individuais. "vs Benchmark" = retorno do ativo menos o benchmark da classe no período.
+          Clique em uma classe para expandir e ver os ativos individuais. "vs Benchmark" = retorno do ativo menos o benchmark da classe no período. Duration = duration modificada atual (PRE/IPCA bullet); CDI flutuante = 0,0 a.
         </div>
       </div>
 

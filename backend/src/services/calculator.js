@@ -100,6 +100,23 @@ function diasEntre(d1, d2) {
   return Math.round((new Date(d2) - new Date(d1)) / 86400000)
 }
 
+// Duration modificada (anos) de um instrumento rf_curva bullet.
+// CDI-indexados (taxa flutuante): duration efetiva ≈ 0.
+// PRE e IPCA (bullet, sem cupom intermediário): MD = anos / (1 + taxa_aa).
+export function calcularDurationRF(produto, dataRef) {
+  if (produto.tipo !== 'rf_curva') return null
+  const { indexador, taxa, data_vencimento } = produto
+  if (!data_vencimento) return null
+
+  const hoje = dataRef || new Date().toISOString().split('T')[0]
+  if (data_vencimento <= hoje) return 0
+
+  if (indexador === 'CDI') return 0
+
+  const anos = (new Date(data_vencimento) - new Date(hoje)) / (365.25 * 86400000)
+  return anos / (1 + (taxa || 0) / 100)
+}
+
 function diaUteis(data) {
   const d = new Date(data)
   const dow = d.getUTCDay()
@@ -1376,9 +1393,18 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
             peso_classe_medio: 0,
             n: 0,
             sem_dados: false,
+            indexador: p.indexador,
+            tipo_cdi: p.tipo_cdi,
+            taxa: p.taxa,
+            data_vencimento: p.data_vencimento,
           }
         }
         const a = acumAtivo[ativoKey]
+        // Atualiza campos de duration com os valores mais recentes do ativo
+        a.indexador = p.indexador
+        a.tipo_cdi = p.tipo_cdi
+        a.taxa = p.taxa
+        a.data_vencimento = p.data_vencimento
         if (ret != null) {
           a.retorno_acum *= (1 + ret)
           a.contribuicao_total += ret * pesoNorm * pesoClasse
@@ -1400,12 +1426,21 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     }
   }
 
+  const hoje = new Date().toISOString().split('T')[0]
+
   // Montar ativos por classe
   const ativosPorClasse = {}
   for (const [key, a] of Object.entries(acumAtivo)) {
     if (!ativosPorClasse[a.classe]) ativosPorClasse[a.classe] = []
     const retorno = a.retorno_acum - 1
     const benchmark = a.benchmark_acum - 1
+    const duration = calcularDurationRF({
+      tipo: a.tipo,
+      indexador: a.indexador,
+      tipo_cdi: a.tipo_cdi,
+      taxa: a.taxa,
+      data_vencimento: a.data_vencimento,
+    }, hoje)
     ativosPorClasse[a.classe].push({
       nome: a.nome,
       identificador: a.identificador,
@@ -1416,6 +1451,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       contribuicao: a.contribuicao_total,
       vs_benchmark: a.sem_dados ? null : retorno - benchmark,
       sem_dados: a.sem_dados,
+      duration,
     })
   }
 
@@ -1423,6 +1459,15 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     const ac = acumClasse[key]
     const retorno = ac.retorno - 1
     const benchmark = ac.benchmark - 1
+    const ativosClasse = ativosPorClasse[key] ?? []
+
+    // Média ponderada de duration dos ativos rf_curva da classe (pelo peso na classe)
+    const rfComDuration = ativosClasse.filter((a) => a.duration != null)
+    const pesoRF = rfComDuration.reduce((s, a) => s + a.peso_classe, 0)
+    const duration_media_rf = rfComDuration.length > 0 && pesoRF > 0
+      ? rfComDuration.reduce((s, a) => s + a.duration * (a.peso_classe / pesoRF), 0)
+      : null
+
     return {
       key,
       nome,
@@ -1431,7 +1476,8 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       contribuicao: ac.contribuicao_acum,
       benchmark,
       vs_benchmark: retorno - benchmark,
-      ativos: (ativosPorClasse[key] ?? []).sort((a, b) => b.contribuicao - a.contribuicao),
+      duration_media_rf,
+      ativos: ativosClasse.sort((a, b) => b.contribuicao - a.contribuicao),
     }
   }).filter((c) => c.peso > 0 || c.retorno !== 0)
 
