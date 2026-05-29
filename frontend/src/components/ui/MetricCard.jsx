@@ -6,13 +6,13 @@ function TooltipIcon({ text }) {
     <span className="relative group inline-block cursor-help ml-1 align-middle">
       <span className="text-[10px] leading-none text-slate-600 group-hover:text-slate-400 select-none">ⓘ</span>
       <span className={clsx(
-        'pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2',
-        'hidden group-hover:block z-50',
+        'pointer-events-none absolute top-full left-0 mt-1.5',
+        'hidden group-hover:block z-[9999]',
         'w-56 text-[11px] text-slate-300 bg-[#1a1d2e] border border-border',
-        'rounded-lg px-3 py-2 leading-relaxed shadow-xl font-normal font-sans'
+        'rounded-lg px-3 py-2 leading-relaxed shadow-xl font-normal font-sans whitespace-normal'
       )}>
+        <span className="absolute bottom-full left-3 border-4 border-transparent border-b-border" />
         {text}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border" />
       </span>
     </span>
   )
