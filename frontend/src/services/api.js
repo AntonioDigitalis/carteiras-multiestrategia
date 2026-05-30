@@ -8,8 +8,10 @@ async function request(path, options = {}) {
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || `HTTP ${res.status}`)
+    const body = await res.text().catch(() => '')
+    let msg = res.statusText
+    try { const j = JSON.parse(body); msg = j.error || j.message || msg } catch (_) { if (body) msg = body }
+    throw new Error(msg || `HTTP ${res.status}`)
   }
 
   return res.json()
@@ -101,9 +103,16 @@ export const api = {
   // Otimizador
   otimizar: (carteiraId, params = {}) =>
     request(`/carteiras/${carteiraId}/otimizar`, { method: 'POST', body: params }),
-  exportarExcel: (carteiraId, params = {}) => {
+  exportarExcel: async (carteiraId, params = {}) => {
     const qs = new URLSearchParams(params).toString()
-    return fetch(`/api/carteiras/${carteiraId}/exportar-excel?${qs}`).then((r) => r.blob())
+    const r = await fetch(`/api/carteiras/${carteiraId}/exportar-excel?${qs}`)
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      let msg = r.statusText
+      try { const j = JSON.parse(body); msg = j.error || j.message || msg } catch (_) { if (body) msg = body }
+      throw new Error(msg || `HTTP ${r.status}`)
+    }
+    return r.blob()
   },
   getAtivosClasse: (carteiraId, classe) =>
     request(`/carteiras/${carteiraId}/ativos-classe?classe=${classe}`),
@@ -112,8 +121,8 @@ export const api = {
 
   // Exportar / Importar
   exportar: () => request('/config/exportar'),
-  importar: (data, modo) =>
-    request('/config/importar', { method: 'POST', body: { data, modo } }),
+  importar: (data, modo, confirmar = false) =>
+    request('/config/importar', { method: 'POST', body: { data, modo, confirmar } }),
 
   // Configurações
   getConfig: () => request('/config'),

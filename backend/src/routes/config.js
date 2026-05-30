@@ -3,11 +3,16 @@ import { getDb } from '../db/database.js'
 
 const router = Router()
 
+// Chaves sensíveis que nunca devem ser expostas em texto plano via API
+const SENSITIVE_CONFIG_KEYS = new Set(['anbima_client_id', 'anbima_client_secret'])
+
 // GET /api/config
 router.get('/', (req, res) => {
   const db = getDb()
   const rows = db.prepare('SELECT * FROM configuracoes').all()
-  const config = Object.fromEntries(rows.map((r) => [r.chave, r.valor]))
+  const config = Object.fromEntries(
+    rows.map((r) => [r.chave, SENSITIVE_CONFIG_KEYS.has(r.chave) ? (r.valor ? '***' : null) : r.valor])
+  )
   res.json(config)
 })
 
@@ -42,7 +47,10 @@ router.get('/exportar', (req, res) => {
     retornos_mensais: db.prepare('SELECT * FROM retornos_mensais').all(),
     alertas_auditoria: db.prepare('SELECT * FROM alertas_auditoria').all(),
     log_captacao: db.prepare('SELECT * FROM log_captacao ORDER BY timestamp DESC LIMIT 1000').all(),
-    configuracoes: db.prepare('SELECT * FROM configuracoes').all(),
+    // Credenciais de API não são exportadas — devem ser reconfiguradas no destino
+    configuracoes: db.prepare(
+      `SELECT * FROM configuracoes WHERE chave NOT IN ('anbima_client_id', 'anbima_client_secret')`
+    ).all(),
   }
   res.json(exportData)
 })
@@ -50,7 +58,7 @@ router.get('/exportar', (req, res) => {
 // POST /api/config/importar
 router.post('/importar', (req, res) => {
   const db = getDb()
-  const { data, modo } = req.body
+  const { data, modo, confirmar } = req.body
 
   if (!data || !modo) {
     return res.status(400).json({ error: 'Dados e modo são obrigatórios' })
@@ -60,7 +68,14 @@ router.post('/importar', (req, res) => {
     return res.status(400).json({ error: 'Modo deve ser "substituir" ou "merge"' })
   }
 
+  if (modo === 'substituir' && confirmar !== true) {
+    return res.status(400).json({ error: 'Modo substituir requer confirmar: true para evitar perda acidental de dados' })
+  }
+
   try {
+    // Ativa FK enforcement para o bloco de import — FKs inválidas lançam exceção
+    // em vez de criar registros órfãos silenciosamente (volta a OFF no finally)
+    db.pragma('foreign_keys = ON')
     db.transaction(() => {
       if (modo === 'substituir') {
         // Limpar tabelas (exceto perfis e carteiras base)
@@ -162,6 +177,8 @@ router.post('/importar', (req, res) => {
   } catch (e) {
     console.error('[importar]', e)
     res.status(500).json({ error: e.message })
+  } finally {
+    db.pragma('foreign_keys = OFF')
   }
 })
 

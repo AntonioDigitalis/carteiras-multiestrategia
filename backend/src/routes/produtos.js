@@ -20,6 +20,7 @@ router.post('/:estadoId/produtos', (req, res) => {
     tipo, classe, nome, identificador,
     peso, indexador, tipo_cdi, taxa,
     data_emissao, data_vencimento, isento_ir,
+    duration_manual,
   } = req.body
 
   if (!['fundo', 'acao', 'rf_curva', 'carteira'].includes(tipo)) {
@@ -28,14 +29,15 @@ router.post('/:estadoId/produtos', (req, res) => {
 
   const result = db.prepare(`
     INSERT INTO produtos
-      (estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir, duration_manual)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     req.params.estadoId, tipo, classe, nome,
     identificador || null, peso || 0,
     indexador || null, tipo_cdi || null, taxa || null,
     data_emissao || null, data_vencimento || null,
     isento_ir ? 1 : 0,
+    duration_manual != null ? Number(duration_manual) : null,
   )
 
   const created = db.prepare('SELECT * FROM produtos WHERE id = ?').get(result.lastInsertRowid)
@@ -49,6 +51,7 @@ router.put('/:id', async (req, res) => {
     tipo, classe, nome, identificador,
     peso, indexador, tipo_cdi, taxa,
     data_emissao, data_vencimento, isento_ir,
+    duration_manual,
   } = req.body
 
   const anterior = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id)
@@ -58,13 +61,15 @@ router.put('/:id', async (req, res) => {
     UPDATE produtos SET
       tipo = ?, classe = ?, nome = ?, identificador = ?,
       peso = ?, indexador = ?, tipo_cdi = ?, taxa = ?,
-      data_emissao = ?, data_vencimento = ?, isento_ir = ?
+      data_emissao = ?, data_vencimento = ?, isento_ir = ?,
+      duration_manual = ?
     WHERE id = ?
   `).run(
     tipo, classe, nome, identificador || null,
     peso || 0, indexador || null, tipo_cdi || null, taxa || null,
     data_emissao || null, data_vencimento || null,
     isento_ir ? 1 : 0,
+    duration_manual != null ? Number(duration_manual) : null,
     req.params.id,
   )
 
@@ -90,7 +95,8 @@ router.put('/:id', async (req, res) => {
         if (tipo === 'fundo') {
           const cotas = await fetchCotaFundo(identificador, dataInicio, hoje)
           const stmt = db.prepare(
-            'INSERT OR IGNORE INTO cotas_cache (produto_id, data, valor, fonte) VALUES (?, ?, ?, ?)'
+            `INSERT INTO cotas_cache (produto_id, data, valor, fonte) VALUES (?, ?, ?, ?)
+             ON CONFLICT(produto_id, data) DO UPDATE SET valor = excluded.valor, fonte = excluded.fonte`
           )
           db.transaction(() => {
             for (const c of cotas) {

@@ -537,7 +537,7 @@ function EventosTab({ eventos, filtroCarteira, saude, onRevisar }) {
 function LogTab({ log, saude, filtroCarteira }) {
   const logFiltrado = (() => {
     if (filtroCarteira === 'todas') return log
-    if (!saude) return log
+    if (!saude?.produtos) return log
     const produtosDaCarteira = saude.produtos
       .filter((p) => filtroCarteira === 'sem_carteira'
         ? !p.carteira_ids || p.carteira_ids.length === 0

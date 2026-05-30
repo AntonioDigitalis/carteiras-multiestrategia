@@ -18,7 +18,7 @@ const BENCHMARKS_PASSIVA = {
   inflacao:        'IMA-B (IMAB11)',
   prefixado:       'IRF-M (IRFM11)',
   rf_global:       'AGG + Hedge BRL',
-  multimercado:    'CDI + 2,0% a.a. (proxy IHFA)',
+  multimercado:    'IHFA',
   rv_brasil:       'Ibovespa',
   rv_global:       'ACWI + Hedge BRL',
   fundos_listados: 'IFIX',
@@ -54,6 +54,8 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
   }
 
   if (cls === 'multimercado') {
+    const ihfa = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IHFA_MENSAL' AND data=?`).get(mesData)
+    if (ihfa) return ihfa.valor / 100
     return cdiMensal + (Math.pow(1 + SPREADS_FALLBACK_AA.multimercado.spread, 1 / 12) - 1)
   }
 
@@ -98,6 +100,25 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
 
 function diasEntre(d1, d2) {
   return Math.round((new Date(d2) - new Date(d1)) / 86400000)
+}
+
+// Duration modificada (anos). Valor manual tem precedência sobre o cálculo automático.
+// Para rf_curva: CDI flutuante → 0; PRE/IPCA bullet → anos / (1 + taxa_aa).
+// Para outros tipos (acao, fundo): apenas duration_manual é usado.
+export function calcularDurationRF(produto, dataRef) {
+  if (produto.duration_manual != null) return Number(produto.duration_manual)
+
+  if (produto.tipo !== 'rf_curva') return null
+  const { indexador, taxa, data_vencimento } = produto
+  if (!data_vencimento) return null
+
+  const hoje = dataRef || new Date().toISOString().split('T')[0]
+  if (data_vencimento <= hoje) return 0
+
+  if (indexador === 'CDI') return 0
+
+  const anos = (new Date(data_vencimento) - new Date(hoje)) / (365.25 * 86400000)
+  return anos / (1 + (taxa || 0) / 100)
 }
 
 function diaUteis(data) {
@@ -182,11 +203,21 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
   const mesInicio = dataInicio.slice(0, 7)
   const mesFim = dataFim.slice(0, 7)
 
-  const estados = db.prepare(`
+  let estados = db.prepare(`
     SELECT * FROM estados_portfolio
     WHERE carteira_id = ? AND mes >= ? AND mes <= ?
     ORDER BY data_inicio
   `).all(subCarteiraId, mesInicio, mesFim)
+
+  // Fallback: estado aberto do mês anterior cobrindo este período (ex: último mes='2026-04' com data_fim=NULL cobrindo maio/2026)
+  if (estados.length === 0) {
+    estados = db.prepare(`
+      SELECT * FROM estados_portfolio
+      WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+      ORDER BY data_inicio
+    `).all(subCarteiraId, dataFim, dataInicio)
+  }
+
   if (estados.length === 0) return null
 
   // Mapa mes → alocação (usa a mais recente disponível)
@@ -237,7 +268,10 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
 
   if (produto.tipo === 'carteira') {
     const subCarteiraId = Number(produto.identificador)
-    if (!subCarteiraId) return null
+    if (!subCarteiraId) {
+      console.warn(`[calcularRetornoProduto] produto id=${produto.id} tipo=carteira sem identificador válido`)
+      return null
+    }
     return calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim)
   }
 
@@ -291,10 +325,11 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
     const fp = cotasPrimary[0]
     const lp = cotasPrimary[cotasPrimary.length - 1]
 
-    if (cotasPrimary.length >= 2 && fp?.valor_ajustado && lp?.valor_ajustado) {
+    if (cotasPrimary.length >= 2 && fp?.valor_ajustado && lp?.valor_ajustado && fp.valor > 0 && lp.valor > 0) {
       const ratioFirst = fp.valor_ajustado / fp.valor
       const ratioLast  = lp.valor_ajustado  / lp.valor
-      const ratioDrift = Math.max(ratioFirst, ratioLast) / Math.min(ratioFirst, ratioLast)
+      const minRatio   = Math.min(ratioFirst, ratioLast)
+      const ratioDrift = minRatio > 0 ? Math.max(ratioFirst, ratioLast) / minRatio : Infinity
       if (ratioDrift <= 4) {
         valorInicio = fp.valor_ajustado
         valorFim    = lp.valor_ajustado
@@ -357,19 +392,20 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
     `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
   ).all(carteiraId, mes)
 
-  // Mês ainda não configurado — usa o estado aberto mais recente (data_fim IS NULL)
-  if (estados.length === 0) {
-    estados = db.prepare(
-      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes <= ? AND data_fim IS NULL ORDER BY mes DESC`
-    ).all(carteiraId, mes)
-    // Só estende se o estado imediatamente anterior for o mês passado (portfolio contínuo)
-    if (estados.length === 0) return null
-  }
-
   const [ano, m] = mes.split('-').map(Number)
   const inicioMes = `${mes}-01`
   const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
-  const totalDias = diasEntre(inicioMes, fimMes) + 1
+
+  // Mês sem estado próprio: procura estados que cobrem esse mês por data
+  // (ex: estado de fev com data_fim em abr cobre março inteiro)
+  if (estados.length === 0) {
+    estados = db.prepare(
+      `SELECT * FROM estados_portfolio
+       WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+       ORDER BY data_inicio`
+    ).all(carteiraId, fimMes, inicioMes)
+    if (estados.length === 0) return null
+  }
 
   // Se o primeiro estado começa depois do dia 1, preenche o gap com o estado
   // mais recente do mês anterior (convenção do 7º dia útil).
@@ -391,17 +427,15 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
     const est = estados[i]
     const inicio = est.data_inicio > inicioMes ? est.data_inicio : inicioMes
     const fim = est.data_fim && est.data_fim < fimMes ? est.data_fim : fimMes
-    const diasEst = diasEntre(inicio, fim) + 1
 
     const produtos = db.prepare(
       `SELECT p.* FROM produtos p WHERE p.estado_id = ?`
     ).all(est.id)
 
     const retEst = calcularRetornoEstado({ alocacao }, produtos, inicio, fim)
-    const peso = diasEst / totalDias
 
-    // Ponderação por dias corridos
-    retornoMes += retEst * peso
+    // Composição sequencial dos estados: cada estado rende em cima do anterior
+    retornoMes *= (1 + retEst)
   }
 
   return retornoMes - 1
@@ -410,9 +444,24 @@ export function calcularRetornoMes(carteiraId, mes, alocacao) {
 // ── Alocações macro com extensão automática para meses não configurados ────
 
 function getAlocacoesExtendidas(db, perfilId, carteiraId, mesInicioStr, mesFimStr) {
-  const alocacoes = db.prepare(
+  const raw = db.prepare(
     `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
   ).all(perfilId, mesInicioStr, mesFimStr)
+
+  // Preenche gaps internos: se um mês está faltando, carrega a alocação do mês anterior
+  const alocacoes = []
+  for (let i = 0; i < raw.length; i++) {
+    alocacoes.push(raw[i])
+    if (i < raw.length - 1) {
+      let [y, m] = raw[i].mes.split('-').map(Number)
+      while (true) {
+        m++; if (m > 12) { m = 1; y++ }
+        const prox = `${y}-${String(m).padStart(2, '0')}`
+        if (prox >= raw[i + 1].mes) break
+        alocacoes.push({ ...raw[i], mes: prox })
+      }
+    }
+  }
 
   // Estende para meses além do último configurado se o portfolio tiver estado aberto
   const estadoAberto = db.prepare(
@@ -505,7 +554,7 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
   if (identifiers.length) {
     const ph2 = identifiers.map(() => '?').join(',')
     const rows = db.prepare(`
-      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
       FROM cotas_cache cc
       JOIN produtos p ON cc.produto_id = p.id
       WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
@@ -514,7 +563,9 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     `).all(...identifiers, bufferStr, dataFim)
     for (const r of rows) {
       if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
-      cotasMapByIdent.get(r.identificador).set(r.data, r.valor)
+      // Usa valor_ajustado quando disponível: captura dividendos no dia ex-dividend
+      // ?? em vez de || para não descartar valor_ajustado=0 legítimo
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado ?? r.valor)
     }
   }
 
@@ -541,6 +592,31 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     if (alocByMes.has(mes)) return alocByMes.get(mes)
     const ant = [...alocByMes.keys()].filter((m) => m <= mes).sort()
     return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
+  }
+
+  // Pré-computa retornos diários de sub-carteiras (tipo='carteira') por mês
+  // Distribui o retorno mensal geometricamente pelos dias úteis do mês
+  const subCarteirasIds = [...new Set(
+    todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
+  )]
+  const subRetDiario = new Map() // key: `${subId}_${mes}` → retorno diário geométrico
+  if (subCarteirasIds.length > 0) {
+    const mesesNoPeriodo = [...new Set(diasUteis.map((d) => d.slice(0, 7)))]
+    for (const mes of mesesNoPeriodo) {
+      const [y, m] = mes.split('-').map(Number)
+      const inicioMes = `${mes}-01`
+      const fimMes = new Date(y, m, 0).toISOString().split('T')[0]
+      const diasDoMes = diasUteis.filter((d) => d.slice(0, 7) === mes).length
+      if (diasDoMes === 0) continue
+      for (const subId of subCarteirasIds) {
+        const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
+        if (retMensal != null) {
+          const base = 1 + retMensal
+          // base <= 0 ocorre se a sub-carteira perdeu 100%+; Math.pow de negativo dá NaN
+          subRetDiario.set(`${subId}_${mes}`, base > 0 ? Math.pow(base, 1 / diasDoMes) - 1 : 0)
+        }
+      }
+    }
   }
 
   // "Última cota conhecida" — pré-alimentado com valores do buffer
@@ -619,8 +695,10 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
                 if (Math.abs(raw) <= 0.40) retP = raw
               }
             }
+          } else if (p.tipo === 'carteira' && p.identificador) {
+            const retDiario = subRetDiario.get(`${p.identificador}_${dia.slice(0, 7)}`)
+            if (retDiario != null) retP = retDiario
           }
-          // tipo 'carteira': retorno diário ignorado (contribuição nula)
 
           if (retP !== null) retClasse += retP * ((p.peso || 0) / pesoTotal)
         }
@@ -632,10 +710,10 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     acumulado *= 1 + retDiario
     serie.push({ data: dia, retorno_acumulado: acumulado - 1, cdi_acumulado: acumuladoCDI - 1 })
 
-    // Avança "última cota conhecida"
+    // Avança "última cota conhecida" — ignora preço 0 (dado ruim) para não travar retorno no dia seguinte
     for (const [ident, cotasMap] of cotasMapByIdent) {
       const v = cotasMap.get(dia)
-      if (v !== undefined) ultimaCota.set(ident, v)
+      if (v !== undefined && v > 0) ultimaCota.set(ident, v)
     }
   }
 
@@ -723,37 +801,57 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     : 0
   const sortino = downDev > 0 ? (cagr - retornoAcumuladoCDI / anos) / downDev : null
 
-  // Max Drawdown
-  let pico = 1
-  let navAtual = 1
+  // Série diária: fonte de verdade para retorno_acumulado, CDI, Max Drawdown
+  const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
+  const ultimoDiario = serieDiaria?.at(-1)
+
+  const retornoFinal    = ultimoDiario?.retorno_acumulado ?? retornoAcumulado
+  const retornoCDIFinal = ultimoDiario?.cdi_acumulado     ?? retornoAcumuladoCDI
+
+  // CAGR recalculado pelo número real de dias úteis da série
+  const cagrFinal = serieDiaria?.length > 0
+    ? Math.pow(1 + retornoFinal, 252 / serieDiaria.length) - 1
+    : cagr
+
+  // Max Drawdown calculado a partir da série diária (captura quedas intra-mês)
   let maxDD = 0
   let mddInicio = null
   let mddFim = null
-  let mddPicoData = null
-  let emDrawdown = false
-
-  for (const { mes, retorno } of retornosMensais) {
-    navAtual *= (1 + retorno)
-    if (navAtual > pico) {
-      pico = navAtual
-      mddPicoData = mes
-      emDrawdown = false
+  let picoDiario = -Infinity
+  let picoData = null
+  if (serieDiaria?.length > 0) {
+    for (const { data, retorno_acumulado } of serieDiaria) {
+      if (retorno_acumulado > picoDiario) { picoDiario = retorno_acumulado; picoData = data }
+      const dd = (1 + retorno_acumulado) / (1 + picoDiario) - 1
+      if (dd < maxDD) { maxDD = dd; mddInicio = picoData; mddFim = data }
     }
-    const dd = navAtual / pico - 1
-    if (dd < maxDD) {
-      maxDD = dd
-      mddFim = mes
-      mddInicio = mddPicoData
+  } else {
+    // Fallback mensal
+    let pico = 1, navAtual = 1, picoMes = null
+    for (const { mes, retorno } of retornosMensais) {
+      navAtual *= (1 + retorno)
+      if (navAtual > pico) { pico = navAtual; picoMes = mes }
+      const dd = navAtual / pico - 1
+      if (dd < maxDD) { maxDD = dd; mddFim = mes; mddInicio = picoMes }
     }
   }
 
-  const calmar = maxDD < 0 ? cagr / Math.abs(maxDD) : null
+  // mdd_duracao em dias úteis (findIndex retorna -1 se data não constar na série — guards necessários)
+  const mddDuracao = (() => {
+    if (!mddInicio || !mddFim || !serieDiaria) return null
+    const idxFim    = serieDiaria.findIndex(p => p.data === mddFim)
+    const idxInicio = serieDiaria.findIndex(p => p.data >= mddInicio)
+    return idxFim >= 0 && idxInicio >= 0 ? idxFim - idxInicio : null
+  })()
+
+  const calmar = maxDD < 0 ? cagrFinal / Math.abs(maxDD) : null
 
   return {
-    retorno_acumulado: retornoAcumulado,
-    retorno_vs_cdi: retornoAcumulado - retornoAcumuladoCDI,
-    retorno_vs_cdi_pct: retornoAcumuladoCDI > 0 ? acumulado / acumuladoCDI - 1 + 1 : null,
-    cagr,
+    retorno_acumulado: retornoFinal,
+    retorno_acumulado_cdi: retornoCDIFinal,
+    retorno_vs_cdi: retornoFinal - retornoCDIFinal,
+    retorno_vs_cdi_pct: retornoCDIFinal > 0 ? retornoFinal / retornoCDIFinal : null,
+    cagr: cagrFinal,
     volatilidade,
     sharpe,
     sortino,
@@ -761,13 +859,13 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     max_drawdown: maxDD,
     mdd_inicio: mddInicio,
     mdd_fim: mddFim,
-    mdd_duracao: mddInicio && mddFim ? retornosMensais.findIndex(r => r.mes === mddFim) - retornosMensais.findIndex(r => r.mes === mddInicio) : null,
+    mdd_duracao: mddDuracao,
     melhor_mes: Math.max(...retornos),
     pior_mes: Math.min(...retornos),
     pct_meses_positivos: retornos.filter((r) => r > 0).length / retornos.length,
     retornos_mensais: retornosMensais,
     serie_retorno: serieRetorno,
-    serie_retorno_diaria: calcularSerieDiaria(carteiraId, inicioStr, fimStr),
+    serie_retorno_diaria: serieDiaria,
     n_meses: retornosMensais.length,
   }
 }
@@ -1054,13 +1152,27 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
 
 // ── Otimizador de Carteira (Monte Carlo) ───────────────────
 
-export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000) {
+export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
   const db = getDb()
   const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
   if (!carteira) return null
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+
+  // Garante pelo menos 12 meses de histórico para que a covariância seja estável.
+  // Se o período selecionado for menor, recua até o início da carteira (ou 24 meses).
+  const primeiroEstado = db.prepare(
+    `SELECT MIN(data_inicio) as d FROM estados_portfolio WHERE carteira_id = ?`
+  ).get(carteiraId)
+  const inicioPossivel = primeiroEstado?.d?.slice(0, 7) ?? '2020-01'
+
+  const inicio12m = (() => {
+    const d = new Date((mesFimStr + '-01'))
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  // Usa o mais recente entre: 24 meses atrás e o início da carteira; ignorando o período selecionado
+  const mesInicioStr = inicioPossivel > inicio12m ? inicioPossivel : inicio12m
 
   const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
   const cdiMedioMensal = cdiRows.length > 0
@@ -1106,13 +1218,32 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
     return { vol, cagr, sharpe }
   }
 
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
   const portfolios = []
   for (let s = 0; s < nSimulacoes; s++) {
     const raw = classesAtivas.map(() => -Math.log(Math.random()))
     const sum = raw.reduce((a, b) => a + b, 0)
-    const weights = raw.map((v) => v / sum)
-    const stats = portfolioStats(weights)
-    portfolios.push({ weights, ...stats })
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    // Clamp ao máximo: redistribui o excesso proporcionalmente aos ativos livres
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) {
+        // Sem capacidade para redistribuir o excesso; fallback para peso igual (sempre ∈ [minW, maxW])
+        weights = Array(n).fill(1 / n)
+        break
+      }
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
+    // Garantia: pesos somam exatamente 1 (erros de ponto flutuante no clamping)
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
+    portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
@@ -1122,10 +1253,57 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const toWeightMap = (p) =>
     classesAtivas.reduce((o, cls, i) => ({ ...o, [cls]: p.weights[i] }), {})
 
+  // ERC via active-set com restrições de mínimo e máximo
+  const pesosRP = (() => {
+    const result = Array(n).fill(0)
+    const fixed = new Set()
+    let budget = 1
+
+    while (true) {
+      const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
+      const m = freeIdx.length
+      if (m === 0) break
+      if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
+
+      const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      let subW = Array(m).fill(1 / m)
+      for (let iter = 0; iter < 300; iter++) {
+        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+        if (totalVar <= 0) break
+        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
+        const rawSum = newSubW.reduce((a, b) => a + b, 0)
+        subW = newSubW.map(v => v / rawSum)
+      }
+      freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
+
+      const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
+      if (minViolI.length > 0) {
+        const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
+        result[worstI] = minW; budget -= minW; fixed.add(worstI)
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
+      }
+      const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
+      if (maxViolI.length > 0) {
+        const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
+        result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
+      }
+      break
+    }
+
+    // Normalização de segurança: garante soma = 1 após active-set
+    const rpSum = result.reduce((a, b) => a + b, 0)
+    return rpSum > 1e-10 ? result.map(r => r / rpSum) : result
+  })()
+
   return {
     fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
     max_sharpe: { weights: toWeightMap(maxSharpe), vol: maxSharpe.vol, cagr: maxSharpe.cagr, sharpe: maxSharpe.sharpe },
     min_vol: { weights: toWeightMap(minVol), vol: minVol.vol, cagr: minVol.cagr, sharpe: minVol.sharpe },
+    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
     atual: { weights: toWeightMap({ weights: pesosAtuais }), ...currentStats },
     classes: classesAtivas,
     labels: classesAtivas.map((cls) => LABELS_CLASSE[cls]),
@@ -1136,11 +1314,22 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
 
 // ── Otimizador por Ativo (Monte Carlo hierárquico) ─────────
 
-export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000) {
+export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
   const db = getDb()
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+
+  // Igual ao otimizador macro: usa sempre pelo menos 24 meses de histórico
+  const primeiroEstado = db.prepare(
+    `SELECT MIN(data_inicio) as d FROM estados_portfolio WHERE carteira_id = ?`
+  ).get(carteiraId)
+  const inicioPossivel = primeiroEstado?.d?.slice(0, 7) ?? '2020-01'
+  const inicio24m = (() => {
+    const d = new Date(mesFimStr + '-01')
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  const mesInicioStr = inicioPossivel > inicio24m ? inicioPossivel : inicio24m
 
   // Meses com estados configurados no período (inclui mês corrente via estado aberto)
   const mesesConfigurados = db.prepare(
@@ -1256,17 +1445,79 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     return { vol, cagr, sharpe }
   }
 
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
   const portfolios = []
   for (let s = 0; s < nSimulacoes; s++) {
     const raw = ativosValidos.map(() => -Math.log(Math.random()))
     const sum = raw.reduce((a, b) => a + b, 0)
-    const weights = raw.map((v) => v / sum)
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) {
+        weights = Array(n).fill(1 / n)
+        break
+      }
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
+    // Garantia: pesos somam exatamente 1 (erros de ponto flutuante no clamping)
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
     portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
   const minVol = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
   const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
+
+  const pesosRP = (() => {
+    const result = Array(n).fill(0)
+    const fixed = new Set()
+    let budget = 1
+
+    while (true) {
+      const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
+      const m = freeIdx.length
+      if (m === 0) break
+      if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
+
+      const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      let subW = Array(m).fill(1 / m)
+      for (let iter = 0; iter < 300; iter++) {
+        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+        if (totalVar <= 0) break
+        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
+        const rawSum = newSubW.reduce((a, b) => a + b, 0)
+        subW = newSubW.map(v => v / rawSum)
+      }
+      freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
+
+      const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
+      if (minViolI.length > 0) {
+        const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
+        result[worstI] = minW; budget -= minW; fixed.add(worstI)
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
+      }
+      const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
+      if (maxViolI.length > 0) {
+        const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
+        result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
+      }
+      break
+    }
+
+    const rpSum2 = result.reduce((a, b) => a + b, 0)
+    return rpSum2 > 1e-10 ? result.map(r => r / rpSum2) : result
+  })()
 
   return {
     classe,
@@ -1279,6 +1530,7 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
     max_sharpe: { ...maxSharpe, weights: toWeightMap(maxSharpe) },
     min_vol: { ...minVol, weights: toWeightMap(minVol) },
+    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
     atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
     n_meses: T,
     n_simulacoes: nSimulacoes,
@@ -1360,6 +1612,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         if (ret != null) retornoClasse += ret * pesoNorm
 
         // Acumular por ativo — normaliza tickers renomeados para o nome canônico
+        if (!p.identificador) continue  // produto sem identificador não pode ser rastreado individualmente
         const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
         const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
         const ativoKey = `${canonicalId}__${cls}`
@@ -1376,9 +1629,20 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
             peso_classe_medio: 0,
             n: 0,
             sem_dados: false,
+            indexador: p.indexador,
+            tipo_cdi: p.tipo_cdi,
+            taxa: p.taxa,
+            data_vencimento: p.data_vencimento,
+            duration_manual: p.duration_manual,
           }
         }
         const a = acumAtivo[ativoKey]
+        // Atualiza campos de duration com os valores mais recentes do ativo
+        a.indexador = p.indexador
+        a.tipo_cdi = p.tipo_cdi
+        a.taxa = p.taxa
+        a.data_vencimento = p.data_vencimento
+        a.duration_manual = p.duration_manual
         if (ret != null) {
           a.retorno_acum *= (1 + ret)
           a.contribuicao_total += ret * pesoNorm * pesoClasse
@@ -1400,12 +1664,22 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     }
   }
 
+  const hoje = new Date().toISOString().split('T')[0]
+
   // Montar ativos por classe
   const ativosPorClasse = {}
   for (const [key, a] of Object.entries(acumAtivo)) {
     if (!ativosPorClasse[a.classe]) ativosPorClasse[a.classe] = []
     const retorno = a.retorno_acum - 1
     const benchmark = a.benchmark_acum - 1
+    const duration = calcularDurationRF({
+      tipo: a.tipo,
+      indexador: a.indexador,
+      tipo_cdi: a.tipo_cdi,
+      taxa: a.taxa,
+      data_vencimento: a.data_vencimento,
+      duration_manual: a.duration_manual,
+    }, hoje)
     ativosPorClasse[a.classe].push({
       nome: a.nome,
       identificador: a.identificador,
@@ -1416,6 +1690,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       contribuicao: a.contribuicao_total,
       vs_benchmark: a.sem_dados ? null : retorno - benchmark,
       sem_dados: a.sem_dados,
+      duration,
     })
   }
 
@@ -1423,6 +1698,15 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     const ac = acumClasse[key]
     const retorno = ac.retorno - 1
     const benchmark = ac.benchmark - 1
+    const ativosClasse = ativosPorClasse[key] ?? []
+
+    // Média ponderada de duration dos ativos rf_curva da classe (pelo peso na classe)
+    const rfComDuration = ativosClasse.filter((a) => a.duration != null)
+    const pesoRF = rfComDuration.reduce((s, a) => s + a.peso_classe, 0)
+    const duration_media_rf = rfComDuration.length > 0 && pesoRF > 0
+      ? rfComDuration.reduce((s, a) => s + a.duration * (a.peso_classe / pesoRF), 0)
+      : null
+
     return {
       key,
       nome,
@@ -1431,7 +1715,8 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       contribuicao: ac.contribuicao_acum,
       benchmark,
       vs_benchmark: retorno - benchmark,
-      ativos: (ativosPorClasse[key] ?? []).sort((a, b) => b.contribuicao - a.contribuicao),
+      duration_media_rf,
+      ativos: ativosClasse.sort((a, b) => b.contribuicao - a.contribuicao),
     }
   }).filter((c) => c.peso > 0 || c.retorno !== 0)
 

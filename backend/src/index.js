@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import { getDb } from './db/database.js'
+import { getDb, closeDb } from './db/database.js'
 import carteirasRouter from './routes/carteiras.js'
 import perfisRouter from './routes/perfis.js'
 import produtosRouter from './routes/produtos.js'
@@ -46,7 +46,11 @@ app.listen(PORT, () => {
   console.log(`   Banco de dados: ./data/carteiras.db\n`)
 })
 
-process.on('SIGINT', () => {
-  console.log('\n[server] Encerrando...')
+function gracefulShutdown(signal) {
+  console.log(`\n[server] Encerrando por ${signal}...`)
+  closeDb()
   process.exit(0)
-})
+}
+
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))

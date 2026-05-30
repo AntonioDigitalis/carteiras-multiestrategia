@@ -137,17 +137,20 @@ function OverviewTab({ metricas }) {
           value={fmtPct(m.cagr)}
           subtitle="Retorno anualizado"
           trend={m.cagr}
+          tooltip="Compound Annual Growth Rate — taxa de retorno anualizada equivalente ao período selecionado. Permite comparar carteiras com históricos de tamanhos diferentes."
         />
         <MetricCard
           title="Volatilidade"
           value={fmtPct(m.volatilidade)}
           subtitle="Anualizada"
+          tooltip="Desvio padrão dos retornos mensais, anualizado (× √12). Mede a dispersão dos resultados em torno da média — quanto maior, mais imprevisível a rentabilidade mensal."
         />
         <MetricCard
           title="Sharpe"
           value={m.sharpe?.toFixed(2)}
           trend={m.sharpe}
           subtitle="vs CDI"
+          tooltip="Retorno excedente ao CDI dividido pela volatilidade. Mede o quanto de retorno extra a carteira entrega por unidade de risco assumido. Acima de 0 = melhor que CDI ajustado ao risco."
         />
       </div>
 
@@ -215,16 +218,21 @@ function OverviewTab({ metricas }) {
             <MetricRow label="Melhor mês" value={fmtPct(m.melhor_mes)} highlight={1} />
             <MetricRow label="Pior mês" value={fmtPct(m.pior_mes)} highlight={-1} />
             <MetricRow label="% Meses positivos" value={m.pct_meses_positivos != null ? `${(m.pct_meses_positivos * 100).toFixed(0)}%` : '—'} />
-            <MetricRow label="vs CDI (acum.)" value={fmtPct(m.retorno_vs_cdi)} highlight={m.retorno_vs_cdi} />
-            <MetricRow label="% do CDI" value={m.retorno_vs_cdi_pct != null ? `${(m.retorno_vs_cdi_pct * 100).toFixed(1)}%` : '—'} />
+            <MetricRow label="vs CDI (acum.)" value={fmtPct(m.retorno_vs_cdi)} highlight={m.retorno_vs_cdi}
+              tooltip="Diferença absoluta entre o retorno acumulado da carteira e o CDI no período (em pontos percentuais). Positivo = superou o CDI." />
+            <MetricRow label="% do CDI" value={m.retorno_vs_cdi_pct != null ? `${(m.retorno_vs_cdi_pct * 100).toFixed(1)}%` : '—'}
+              tooltip="Retorno da carteira expresso como proporção do CDI no mesmo período. Ex: 90% CDI = a carteira rendeu 90% do que o CDI rendeu. Acima de 100% = superou o CDI." />
           </div>
         </div>
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-3">Risco</div>
           <div className="space-y-0.5">
-            <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1} />
-            <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino} />
-            <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar} />
+            <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+              tooltip="Maior queda percentual do pico ao vale registrada no período. Mede o pior cenário de perda que um investidor poderia ter sofrido." />
+            <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+              tooltip="Variação do Sharpe que penaliza apenas a volatilidade negativa (retornos abaixo do CDI). Mais relevante que o Sharpe quando as perdas são a principal preocupação." />
+            <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+              tooltip="CAGR dividido pelo módulo do Max Drawdown. Mede o retorno anualizado obtido por cada ponto percentual de risco máximo assumido. Quanto maior, melhor." />
             <MetricRow label="Início MDD" value={m.mdd_inicio ?? '—'} />
             <MetricRow label="Fim MDD" value={m.mdd_fim ?? '—'} />
           </div>
@@ -313,16 +321,29 @@ function RiscoTab({ metricas }) {
     <div className="grid grid-cols-2 gap-4">
       <div className="card space-y-0.5">
         <div className="text-sm font-medium text-slate-300 mb-3">Métricas de Risco</div>
-        <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)} />
-        <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1} />
-        <MetricRow label="Duração MDD (dias)" value={m.mdd_duracao ?? '—'} />
-        <MetricRow label="Recuperação (dias)" value={m.mdd_recuperacao ?? 'N/A'} />
-        <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe} />
-        <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino} />
-        <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar} />
+        <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
+          tooltip="Desvio padrão dos retornos mensais, anualizado (× √12). Mede a dispersão dos resultados em torno da média — quanto maior, mais imprevisível a rentabilidade." />
+        <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+          tooltip="Maior queda percentual do pico ao vale registrada no período. Mede o pior cenário de perda que um investidor poderia ter sofrido." />
+        <MetricRow label="Duração MDD (meses)" value={m.mdd_duracao ?? '—'}
+          tooltip="Número de meses desde o pico até o fundo do maior drawdown. Indica por quanto tempo a carteira ficou em queda contínua." />
+        <MetricRow label="Recuperação (meses)" value={m.mdd_recuperacao ?? 'N/A'}
+          tooltip="Número de meses para recuperar o patamar anterior ao maior drawdown. Não disponível se a recuperação ainda não ocorreu no período." />
+        <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
+          tooltip="Retorno excedente ao CDI dividido pela volatilidade total (positiva e negativa). Mede eficiência por unidade de risco total. Acima de 0 = melhor que CDI ajustado ao risco." />
+        <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+          tooltip="Como o Sharpe, mas usa apenas a volatilidade negativa (downside deviation). Penaliza somente as oscilações para baixo, ignorando a volatilidade positiva." />
+        <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+          tooltip="CAGR dividido pelo módulo do Max Drawdown. Responde: quantos % de retorno anual a carteira entrega para cada % de queda máxima suportada." />
       </div>
     </div>
   )
+}
+
+function fmtDur(d) {
+  if (d == null) return '—'
+  if (d === 0) return '0,0 a'
+  return `${d.toFixed(1).replace('.', ',')} a`
 }
 
 function AtribuicaoTab({ carteiraId, period }) {
@@ -357,6 +378,7 @@ function AtribuicaoTab({ carteiraId, period }) {
             <tr className="text-slate-500 border-b border-border">
               <th className="text-left pb-2 font-medium pl-2">Classe / Ativo</th>
               <th className="text-right pb-2 font-medium">Peso</th>
+              <th className="text-right pb-2 font-medium" title="Duration modificada dos ativos de RF (anos). CDI flutuante = 0.">Duration RF</th>
               <th className="text-right pb-2 font-medium">Retorno</th>
               <th className="text-right pb-2 font-medium">vs Benchmark</th>
               <th className="text-right pb-2 font-medium">Contribuição</th>
@@ -385,6 +407,9 @@ function AtribuicaoTab({ carteiraId, period }) {
                       {cl.nome}
                     </td>
                     <td className="py-2 text-right text-slate-400 font-mono">{fmtPct(cl.peso)}</td>
+                    <td className="py-2 text-right font-mono text-slate-300">
+                      {fmtDur(cl.duration_media_rf)}
+                    </td>
                     <td className={clsx('py-2 text-right font-mono font-semibold', cl.retorno >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {fmtPct(cl.retorno)}
                     </td>
@@ -417,6 +442,9 @@ function AtribuicaoTab({ carteiraId, period }) {
                         <div>{fmtPct(at.peso_portfolio)}</div>
                         <div className="text-slate-600">{fmtPct(at.peso_classe)} na classe</div>
                       </td>
+                      <td className="py-1.5 text-right font-mono text-[11px] text-slate-400">
+                        {fmtDur(at.duration)}
+                      </td>
                       <td className={clsx('py-1.5 text-right font-mono text-[11px]', at.retorno >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                         {fmtPct(at.retorno)}
                       </td>
@@ -434,7 +462,7 @@ function AtribuicaoTab({ carteiraId, period }) {
           </tbody>
         </table>
         <div className="mt-3 text-[10px] text-slate-600">
-          Clique em uma classe para expandir e ver os ativos individuais. "vs Benchmark" = retorno do ativo menos o benchmark da classe no período.
+          Clique em uma classe para expandir e ver os ativos individuais. "vs Benchmark" = retorno do ativo menos o benchmark da classe no período. Duration = duration modificada atual (PRE/IPCA bullet); CDI flutuante = 0,0 a.
         </div>
       </div>
 
@@ -611,7 +639,7 @@ const LABELS_CLASSE_FE = {
   alternativos:    'Alternativos',
 }
 
-const CORES_OTIMIZADOR = { max_sharpe: '#22c55e', min_vol: '#f59e0b', atual: '#3b82f6' }
+const CORES_OTIMIZADOR = { max_sharpe: '#22c55e', min_vol: '#f59e0b', paridade_risco: '#a855f7', atual: '#3b82f6' }
 
 const LABELS_CLASSE_OT = {
   pos_fixado: 'Pós-fixado', inflacao: 'Inflação', prefixado: 'Pré-fixado',
@@ -651,6 +679,8 @@ function OtimizadorMacro({ carteiraId, period }) {
   const [resultado, setResultado] = useState(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
+  const [minPeso, setMinPeso] = useState(0)
+  const [maxPeso, setMaxPeso] = useState(0)
 
   async function otimizar() {
     setLoading(true); setErro(null); setResultado(null)
@@ -658,6 +688,8 @@ function OtimizadorMacro({ carteiraId, period }) {
       const params = {}
       if (period?.start) params.start = period.start
       if (period?.end) params.end = period.end
+      if (minPeso > 0) params.min_peso = minPeso
+      if (maxPeso > 0) params.max_peso = maxPeso
       const data = await api.otimizar(carteiraId, params)
       if (data?.error) { setErro(data.error); return }
       setResultado(data)
@@ -672,6 +704,25 @@ function OtimizadorMacro({ carteiraId, period }) {
         <p className="text-xs text-slate-500 mb-4">
           Simula {(5000).toLocaleString()} combinações de pesos entre as classes de ativos e identifica os portfólios de máximo Sharpe e mínima volatilidade.
         </p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Mín. por classe (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={minPeso}
+              onChange={(e) => setMinPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Máx. por classe (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={maxPeso}
+              onChange={(e) => setMaxPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <span className="text-[10px] text-slate-600">0 = sem restrição</span>
+        </div>
         <button onClick={otimizar} disabled={loading} className="btn-primary flex items-center gap-2">
           {loading ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Otimizando...</> : 'Otimizar Carteira'}
         </button>
@@ -685,9 +736,12 @@ function OtimizadorMacro({ carteiraId, period }) {
             <p className="text-xs text-slate-500 mb-4">Cada ponto representa um portfólio simulado. Os portfólios ótimos estão destacados.</p>
             <FronteiraChart resultado={resultado} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <PesosCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} classes={resultado.classes} labels={resultado.labels} />
+          <div className="grid grid-cols-3 gap-4">
+            <PesosCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${Number.isFinite(resultado.max_sharpe.sharpe) ? resultado.max_sharpe.sharpe.toFixed(2) : '—'}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} classes={resultado.classes} labels={resultado.labels} />
             <PesosCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} classes={resultado.classes} labels={resultado.labels} />
+            {resultado.paridade_risco && (
+              <PesosCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} classes={resultado.classes} labels={resultado.labels} />
+            )}
           </div>
           <div className="card overflow-x-auto">
             <div className="text-sm font-medium text-slate-300 mb-4">Comparação de Portfólios</div>
@@ -698,6 +752,7 @@ function OtimizadorMacro({ carteiraId, period }) {
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.atual }}>Atual</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.max_sharpe }}>Máx. Sharpe</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.min_vol }}>Mín. Vol.</th>
+                  {resultado.paridade_risco && <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>Par. Risco</th>}
                 </tr>
               </thead>
               <tbody>
@@ -711,6 +766,7 @@ function OtimizadorMacro({ carteiraId, period }) {
                     <td className="py-2 text-right font-mono text-slate-300">{fmt(resultado.atual[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-green">{fmt(resultado.max_sharpe[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-yellow">{fmt(resultado.min_vol[key]) ?? '—'}</td>
+                    {resultado.paridade_risco && <td className="py-2 text-right font-mono" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>{fmt(resultado.paridade_risco[key]) ?? '—'}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -735,18 +791,21 @@ function OtimizadorAtivo({ carteiraId, period }) {
   const [resultado, setResultado] = useState(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
+  const [minPeso, setMinPeso] = useState(0)
+  const [maxPeso, setMaxPeso] = useState(0)
 
-  async function carregarAtivos(cls) {
+  useEffect(() => {
+    let cancelled = false
     setLoadingAtivos(true)
     setResultado(null)
-    try {
-      const data = await api.getAtivosClasse(carteiraId, cls)
-      setAtivos(data)
-    } catch (e) { /* silencioso */ }
-    finally { setLoadingAtivos(false) }
-  }
-
-  useEffect(() => { carregarAtivos(classe) }, [classe, carteiraId])
+    setMinPeso(0)
+    setMaxPeso(0)
+    api.getAtivosClasse(carteiraId, classe)
+      .then((data) => { if (!cancelled) setAtivos(data) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingAtivos(false) })
+    return () => { cancelled = true }
+  }, [classe, carteiraId])
 
   async function adicionarAtivo() {
     const id = novoId.trim()
@@ -754,7 +813,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
     if (ativos.some((a) => a.identificador === id)) { setAddErro('Ativo já está na lista'); return }
     setAddLoading(true); setAddErro(null)
     try {
-      const isCNPJ = id.includes('/')
+      const isCNPJ = id.replace(/\D/g, '').length === 14
       let nome = id
       let tipo = 'acao'
       if (isCNPJ) {
@@ -776,11 +835,17 @@ function OtimizadorAtivo({ carteiraId, period }) {
 
   async function otimizar() {
     if (ativos.length < 2) { setErro('Adicione ao menos 2 ativos'); return }
+    if (minPeso > 0 && minPeso * ativos.length > 100) {
+      setErro(`Mín. ${minPeso}% × ${ativos.length} ativos = ${minPeso * ativos.length}% — impossível somar 100%. Reduza o mínimo.`)
+      return
+    }
     setLoading(true); setErro(null); setResultado(null)
     try {
       const body = { classe, ativos, n_simulacoes: 5000 }
       if (period?.start) body.start = period.start
       if (period?.end) body.end = period.end
+      if (minPeso > 0) body.min_peso = minPeso
+      if (maxPeso > 0) body.max_peso = maxPeso
       const data = await api.otimizarClasse(carteiraId, body)
       if (data?.error) { setErro(data.error); return }
       setResultado(data)
@@ -803,7 +868,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
           <select
             value={classe}
             onChange={(e) => setClasse(e.target.value)}
-            className="bg-surface border border-border rounded px-3 py-1.5 text-xs text-slate-200 w-full"
+            className="bg-bg-tertiary border border-border rounded px-3 py-1.5 text-xs text-slate-200 w-full"
           >
             {Object.entries(LABELS_CLASSE_OT).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
@@ -850,6 +915,26 @@ function OtimizadorAtivo({ carteiraId, period }) {
           {addErro && <div className="mt-1 text-xs text-accent-red">{addErro}</div>}
         </div>
 
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Mín. por ativo (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={minPeso}
+              onChange={(e) => setMinPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Máx. por ativo (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={maxPeso}
+              onChange={(e) => setMaxPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <span className="text-[10px] text-slate-600">0 = sem restrição</span>
+        </div>
+
         <button onClick={otimizar} disabled={loading || ativos.length < 2} className="btn-primary flex items-center gap-2">
           {loading ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Otimizando...</> : 'Otimizar Ativos'}
         </button>
@@ -881,9 +966,12 @@ function OtimizadorAtivo({ carteiraId, period }) {
             <FronteiraChart resultado={resultado} />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <PesosAtivoCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} ativos={resultado.ativos.filter((a) => a.valido)} />
+          <div className={`grid gap-4 ${resultado.paridade_risco ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <PesosAtivoCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${Number.isFinite(resultado.max_sharpe.sharpe) ? resultado.max_sharpe.sharpe.toFixed(2) : '—'}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} ativos={resultado.ativos.filter((a) => a.valido)} />
             <PesosAtivoCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} ativos={resultado.ativos.filter((a) => a.valido)} />
+            {resultado.paridade_risco && (
+              <PesosAtivoCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} ativos={resultado.ativos.filter((a) => a.valido)} />
+            )}
           </div>
 
           <div className="card overflow-x-auto">
@@ -895,6 +983,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.atual }}>Atual</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.max_sharpe }}>Máx. Sharpe</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.min_vol }}>Mín. Vol.</th>
+                  {resultado.paridade_risco && <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>Par. Risco</th>}
                 </tr>
               </thead>
               <tbody>
@@ -908,6 +997,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
                     <td className="py-2 text-right font-mono text-slate-300">{fmt(resultado.atual[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-green">{fmt(resultado.max_sharpe[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-yellow">{fmt(resultado.min_vol[key]) ?? '—'}</td>
+                    {resultado.paridade_risco && <td className="py-2 text-right font-mono" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>{fmt(resultado.paridade_risco[key]) ?? '—'}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -929,7 +1019,8 @@ function PesosAtivoCard({ titulo, subtitulo, cor, portfolio, ativos }) {
       <div className="text-xs text-slate-500 mb-3">{subtitulo}</div>
       <div className="space-y-2">
         {ativos.map((a) => {
-          const w = (portfolio.weights[a.identificador] || 0) * 100
+          if (!a.identificador) return null
+          const w = (portfolio.weights[a.identificador] ?? 0) * 100
           return (
             <div key={a.identificador}>
               <div className="flex justify-between text-xs mb-0.5">
@@ -962,6 +1053,7 @@ function FronteiraChart({ resultado }) {
     { label: '● Atual', vol: +(atual.vol * 100).toFixed(3), cagr: +(atual.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.atual },
     { label: '● Máx. Sharpe', vol: +(max_sharpe.vol * 100).toFixed(3), cagr: +(max_sharpe.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.max_sharpe },
     { label: '● Mín. Vol.', vol: +(min_vol.vol * 100).toFixed(3), cagr: +(min_vol.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.min_vol },
+    ...(resultado.paridade_risco ? [{ label: '● Par. Risco', vol: +(resultado.paridade_risco.vol * 100).toFixed(3), cagr: +(resultado.paridade_risco.cagr * 100).toFixed(3), fill: CORES_OTIMIZADOR.paridade_risco }] : []),
   ]
 
   return (

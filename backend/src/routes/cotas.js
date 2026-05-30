@@ -106,10 +106,11 @@ router.post('/:produtoId/sync', async (req, res) => {
 
       const cotas = await fetchCotaFundo(produto.identificador, dataInicio, hoje)
 
-      // Inserir cotas de fundo (formato CVM: {data, valor})
+      // Inserir cotas de fundo (upsert — re-sync sobrescreve cotas corrigidas/revisadas)
       const stmt = db.prepare(`
-        INSERT OR IGNORE INTO cotas_cache (produto_id, data, valor, fonte)
+        INSERT INTO cotas_cache (produto_id, data, valor, fonte)
         VALUES (?, ?, ?, 'CVM')
+        ON CONFLICT(produto_id, data) DO UPDATE SET valor = excluded.valor, fonte = excluded.fonte
       `)
 
       db.transaction(() => {
@@ -261,7 +262,7 @@ function verificarRetornosAnomalos(db) {
           VALUES ('warning', 'retorno_anomalo', 'Retorno Anômalo', ?, ?, ?, ?, ?, 'ativo')
         `).run(
           `Retorno de ${(retorno * 100).toFixed(1)}% no último mês — acima do limite de ±30%`,
-          p.nome, p.produto_id, hoje, `${(retorno * 100).toFixed(2)}%`,
+          p.identificador, p.produto_id, hoje, `${(retorno * 100).toFixed(2)}%`,
         )
       }
     }
@@ -294,11 +295,11 @@ function verificarCotasTravadas(db, lista = null) {
     if (valoresUnicos.size > 1) continue
 
     // Todos os 5 últimos dias com valor idêntico — cota travada
-    // Verifica se já existe alerta ativo para este identificador
+    // Dedup por identificador (CNPJ) — consistente com vistos.has(p.identificador) acima
     const jaExiste = db.prepare(
       `SELECT id FROM alertas_auditoria
        WHERE ativo = ? AND categoria = 'cota_travada' AND status = 'ativo'`
-    ).get(p.nome)
+    ).get(p.identificador)
     if (jaExiste) continue
 
     db.prepare(`
@@ -307,7 +308,7 @@ function verificarCotasTravadas(db, lista = null) {
       VALUES ('error', 'cota_travada', 'Cota Travada', ?, ?, ?, ?, ?, ?, 'ativo')
     `).run(
       `Cota inalterada nos últimos 5 dias úteis (valor: ${recentes[0].valor})`,
-      recentes[0].nome,
+      p.identificador,
       recentes[0].produto_id,
       hoje,
       recentes[0].valor.toString(),
