@@ -151,7 +151,8 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
 
   if (indexador === 'PRE') {
     const dias = diasEntre(inicio, fim)
-    retorno = Math.pow(1 + taxa / 100, dias / 252) - 1
+    // Convenção: taxa a.a. em dias úteis/252; dias_corridos/365,25 ≈ diasUteis/252 sem calendário de feriados
+    retorno = Math.pow(1 + taxa / 100, dias / 365.25) - 1
 
   } else if (indexador === 'CDI') {
     const cdiRows = getCDIDiarioLocal(inicio, fim)
@@ -188,7 +189,7 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
     const dias = diasEntre(inicio, fim)
     let fatorIPCA = 1
     for (const row of ipcaRows) fatorIPCA *= (1 + row.valor / 100)
-    retorno = fatorIPCA * Math.pow(1 + taxa / 100, dias / 252) - 1
+    retorno = fatorIPCA * Math.pow(1 + taxa / 100, dias / 365.25) - 1
   }
 
   // Gross-up: converte retorno isento em equivalente bruto tributável para
@@ -236,13 +237,15 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
   const alocByMes = new Map(alocRows.map((a) => [a.mes, a]))
 
   function getAloc(mes) {
-    // usa a alocação do mês ou a mais próxima anterior
     for (let i = 0; ; i++) {
       const d = new Date(mes + '-01')
       d.setMonth(d.getMonth() - i)
       const m = d.toISOString().slice(0, 7)
-      if (alocByMes.has(m)) return alocByMes.get(m)
-      if (i > 24) return null
+      if (alocByMes.has(m)) {
+        if (i > 3) console.warn(`[calcularRetornoSubCarteira] alocação de ${m} usada para mes=${mes} (${i} meses de defasagem)`)
+        return alocByMes.get(m)
+      }
+      if (i > 12) return null
     }
   }
 
@@ -338,11 +341,12 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
       const ratioLast  = lp.valor_ajustado  / lp.valor
       const minRatio   = Math.min(ratioFirst, ratioLast)
       const ratioDrift = minRatio > 0 ? Math.max(ratioFirst, ratioLast) / minRatio : Infinity
-      if (ratioDrift <= 4) {
+      if (ratioDrift <= 20) {
+        // threshold 20 cobre splits/grupamentos de até ~10:1 (ex: grupamento 1:10 → drift=10)
         valorInicio = fp.valor_ajustado
         valorFim    = lp.valor_ajustado
       } else {
-        // Ajuste corrompido (ex: recalibração mid-série) — usa nominal combinado
+        // Ajuste possivelmente corrompido (recalibração mid-série) — usa nominal combinado
         valorInicio = first.valor
         valorFim    = last.valor
       }
@@ -705,7 +709,10 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
                 const raw = valorHoje / valorAntes - 1
                 // Ignora retornos diários impossíveis (>40% num dia) — dados corrompidos (ex: ICVM 175 / Yahoo glitch)
                 if (Math.abs(raw) <= 0.40) retP = raw
-                else filteredIdents.add(p.identificador)
+                else {
+                  filteredIdents.add(p.identificador)
+                  console.warn(`[calcularSerieDiaria] retorno filtrado: ${p.identificador} em ${dia} = ${(raw * 100).toFixed(1)}% (>40%)`)
+                }
               }
             }
           } else if (p.tipo === 'carteira' && p.identificador) {
@@ -921,10 +928,10 @@ function calcularRetornosMensaisPorClasse(carteiraId, mesInicioStr, mesFimStr) {
           `SELECT * FROM produtos WHERE estado_id = ? AND classe = ?`
         ).all(est.id, cls)
         if (prods.length === 0) continue
-        const pesototal = prods.reduce((s, p) => s + (p.peso || 0), 0) || 1
-        for (const p of prods) {
-          const ret = calcularRetornoProduto(p, inicioMes, fimMes)
-          if (ret != null) { retornoClasse += ret * ((p.peso || 0) / pesototal); found = true }
+        const retsPorProd = prods.map(p => ({ p, ret: calcularRetornoProduto(p, inicioMes, fimMes) }))
+        const pesoComDados = retsPorProd.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
+        for (const { p, ret } of retsPorProd) {
+          if (ret != null) { retornoClasse += ret * ((p.peso || 0) / (pesoComDados || 1)); found = true }
         }
       }
       row[cls] = found ? retornoClasse : null
@@ -1136,10 +1143,10 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
       let found = false
       for (const est of estados) {
         const prods = db.prepare(`SELECT * FROM produtos WHERE estado_id = ? AND classe = ?`).all(est.id, cls)
-        const pesototal = prods.reduce((s, p) => s + (p.peso || 0), 0) || 1
-        for (const p of prods) {
-          const ret = calcularRetornoProduto(p, inicioMes, fimMes)
-          if (ret != null) { retornoClasse += ret * ((p.peso || 0) / pesototal); found = true }
+        const retsPorProd = prods.map(p => ({ p, ret: calcularRetornoProduto(p, inicioMes, fimMes) }))
+        const pesoComDados = retsPorProd.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
+        for (const { p, ret } of retsPorProd) {
+          if (ret != null) { retornoClasse += ret * ((p.peso || 0) / (pesoComDados || 1)); found = true }
         }
       }
 
@@ -1690,12 +1697,12 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         todosProdutos.push(...prods)
       }
 
-      const pesototal = todosProdutos.reduce((s, p) => s + (p.peso || 0), 0) || 1
+      const retsPorProdAtrib = todosProdutos.map(p => ({ p, ret: calcularRetornoProduto(p, inicioMes, fimMes) }))
+      const pesoComDadosAtrib = retsPorProdAtrib.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
       let retornoClasse = 0
 
-      for (const p of todosProdutos) {
-        const ret = calcularRetornoProduto(p, inicioMes, fimMes)
-        const pesoNorm = (p.peso || 0) / pesototal
+      for (const { p, ret } of retsPorProdAtrib) {
+        const pesoNorm = (p.peso || 0) / (pesoComDadosAtrib || 1)
         if (ret != null) retornoClasse += ret * pesoNorm
 
         // Acumular por ativo — normaliza tickers renomeados para o nome canônico
