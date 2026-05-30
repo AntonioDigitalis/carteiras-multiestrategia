@@ -100,6 +100,18 @@ export const api = {
   fetchIndices: (inicio, fim) =>
     request('/external/indices', { method: 'POST', body: { inicio, fim } }),
 
+  // Correlação
+  getCorrelacao: (carteiraId, params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/carteiras/${carteiraId}/correlacao?${qs}`)
+  },
+
+  // Painel de mercado
+  getMercado: (mes) => {
+    const qs = mes ? `?mes=${mes}` : ''
+    return request(`/carteiras/mercado${qs}`)
+  },
+
   // Otimizador
   otimizar: (carteiraId, params = {}) =>
     request(`/carteiras/${carteiraId}/otimizar`, { method: 'POST', body: params }),

@@ -151,6 +151,16 @@ function runMigrations(db) {
     }
     markRun('rename_asset_classes')
   }
+
+  if (!hasRun('add_performance_indexes')) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_dados_macro_serie_data ON dados_macro(serie, data);
+      CREATE INDEX IF NOT EXISTS idx_estados_carteira_mes ON estados_portfolio(carteira_id, mes);
+      CREATE INDEX IF NOT EXISTS idx_alocacoes_perfil_mes ON alocacoes_macro(perfil_id, mes);
+    `)
+    markRun('add_performance_indexes')
+    console.log('[DB] Migração: índices de performance adicionados.')
+  }
 }
 
 export function getDb() {

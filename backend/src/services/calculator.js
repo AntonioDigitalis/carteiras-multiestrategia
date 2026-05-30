@@ -869,6 +869,63 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
 
   const calmar = maxDD < 0 ? cagrFinal / Math.abs(maxDD) : null
 
+  // ── VaR e CVaR histórico mensal ─────────────────────────
+  const sortedRet = [...retornos].sort((a, b) => a - b)
+  const n = sortedRet.length
+  const varIdx95 = Math.max(0, Math.floor(0.05 * n) - 1)
+  const varIdx99 = Math.max(0, Math.floor(0.01 * n) - 1)
+  const var95  = sortedRet[varIdx95] ?? null
+  const cvar95 = varIdx95 >= 0 ? sortedRet.slice(0, varIdx95 + 1).reduce((s, r) => s + r, 0) / (varIdx95 + 1) : null
+  const var99  = sortedRet[varIdx99] ?? null
+  const cvar99 = varIdx99 >= 0 ? sortedRet.slice(0, varIdx99 + 1).reduce((s, r) => s + r, 0) / (varIdx99 + 1) : null
+
+  // ── Beta e Up/Down Capture vs IBOV ─────────────────────
+  const ibovRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='IBOV_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(mesInicioStr + '-01', mesFimStr + '-01')
+  const ibovByMes = new Map(ibovRows.map(r => [r.data.slice(0, 7), r.valor / 100]))
+
+  const paresMesIbov = retornosMensais
+    .map(r => ({ mes: r.mes, cart: r.retorno, ibov: ibovByMes.get(r.mes) }))
+    .filter(p => p.ibov != null)
+
+  let beta_ibov = null, up_capture = null, down_capture = null
+  const ibovDisponivel = paresMesIbov.length >= 12
+
+  if (ibovDisponivel) {
+    const cartArr  = paresMesIbov.map(p => p.cart)
+    const ibovArr  = paresMesIbov.map(p => p.ibov)
+    const mCart    = cartArr.reduce((s, r) => s + r, 0) / cartArr.length
+    const mIbov    = ibovArr.reduce((s, r) => s + r, 0) / ibovArr.length
+    const covCI    = cartArr.reduce((s, r, i) => s + (r - mCart) * (ibovArr[i] - mIbov), 0) / (cartArr.length - 1)
+    const varIbov  = ibovArr.reduce((s, r) => s + Math.pow(r - mIbov, 2), 0) / (ibovArr.length - 1)
+    beta_ibov = varIbov > 0 ? covCI / varIbov : null
+
+    const upMeses   = paresMesIbov.filter(p => p.ibov > 0)
+    const downMeses = paresMesIbov.filter(p => p.ibov < 0)
+    if (upMeses.length >= 6) {
+      const acumCartUp  = upMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
+      const acumIbovUp  = upMeses.reduce((p, r) => p * (1 + r.ibov), 1) - 1
+      up_capture = acumIbovUp !== 0 ? acumCartUp / acumIbovUp : null
+    }
+    if (downMeses.length >= 3) {
+      const acumCartDn  = downMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
+      const acumIbovDn  = downMeses.reduce((p, r) => p * (1 + r.ibov), 1) - 1
+      down_capture = acumIbovDn !== 0 ? acumCartDn / acumIbovDn : null
+    }
+  }
+
+  // ── Retornos por janela fixa ────────────────────────────
+  const anoFim = mesFimStr.slice(0, 4)
+  const retorno_mtd = retornosMensais.length > 0 ? retornosMensais.at(-1).retorno : null
+  const retorno_ytd = retornosMensais
+    .filter(r => r.mes.startsWith(anoFim))
+    .reduce((p, r) => p * (1 + r.retorno), 1) - 1 || null
+  const ultimos12 = retornosMensais.slice(-12)
+  const retorno_12m = ultimos12.length >= 12 ? ultimos12.reduce((p, r) => p * (1 + r.retorno), 1) - 1 : null
+  const ultimos24 = retornosMensais.slice(-24)
+  const retorno_24m = ultimos24.length >= 24 ? ultimos24.reduce((p, r) => p * (1 + r.retorno), 1) - 1 : null
+
   return {
     retorno_acumulado: retornoFinal,
     retorno_acumulado_cdi: retornoCDIFinal,
@@ -890,6 +947,12 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     serie_retorno: serieRetorno,
     serie_retorno_diaria: serieDiaria,
     n_meses: retornosMensais.length,
+    // Risco
+    var_95, cvar_95, var_99, cvar_99,
+    // vs IBOV
+    beta_ibov, up_capture, down_capture, ibov_disponivel: ibovDisponivel,
+    // Janelas fixas
+    retorno_mtd, retorno_ytd, retorno_12m, retorno_24m,
   }
 }
 
@@ -1206,6 +1269,90 @@ function solverMinVol(cov, n, minW, maxW, iters = 800) {
     if (change < 1e-12) break
   }
   return w
+}
+
+// ── Correlação entre classes ───────────────────────────────
+
+export function calcularCorrelacao(carteiraId, dataInicio, dataFim) {
+  const db = getDb()
+  const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+  const primeiroEstado = db.prepare(
+    `SELECT MIN(data_inicio) as d FROM estados_portfolio WHERE carteira_id = ?`
+  ).get(carteiraId)
+  const inicioPossivel = primeiroEstado?.d?.slice(0, 7) ?? '2020-01'
+  const inicio24m = (() => {
+    const d = new Date(mesFimStr + '-01')
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  const mesInicioStr = inicioPossivel > inicio24m ? inicioPossivel : inicio24m
+
+  const retornosMensais = calcularRetornosMensaisPorClasse(carteiraId, mesInicioStr, mesFimStr)
+  const CLASSES = Object.keys(LABELS_CLASSE)
+  const classesAtivas = CLASSES.filter(cls => retornosMensais.filter(r => r[cls] != null).length >= 12)
+  if (classesAtivas.length < 2) return null
+
+  const T = retornosMensais.length
+  const retMatrix = retornosMensais.map(row => classesAtivas.map(cls => row[cls] ?? 0))
+  const nc = classesAtivas.length
+  const means = classesAtivas.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
+
+  const cov = Array.from({ length: nc }, () => Array(nc).fill(0))
+  for (let i = 0; i < nc; i++)
+    for (let j = 0; j < nc; j++)
+      cov[i][j] = retMatrix.reduce((s, row) => s + (row[i] - means[i]) * (row[j] - means[j]), 0) / Math.max(T - 1, 1)
+
+  const matrix = Array.from({ length: nc }, (_, i) =>
+    Array.from({ length: nc }, (_, j) => {
+      if (i === j) return 1
+      const denom = Math.sqrt(cov[i][i] * cov[j][j])
+      return denom > 0 ? Math.max(-1, Math.min(1, cov[i][j] / denom)) : 0
+    })
+  )
+
+  return {
+    classes: classesAtivas,
+    labels: classesAtivas.map(cls => LABELS_CLASSE[cls]),
+    matrix,
+    n_meses: T,
+  }
+}
+
+// ── Painel de Mercado ──────────────────────────────────────
+
+const SERIES_MERCADO = {
+  CDI_MENSAL:   'CDI',
+  IPCA_MENSAL:  'IPCA',
+  IBOV_MENSAL:  'IBOV',
+  IMAB11_MENSAL:'IMA-B',
+  IFIX_MENSAL:  'IFIX',
+  IRFM11_MENSAL:'IRF-M',
+  DEBB11_MENSAL:'DEBB11',
+}
+
+export function calcularPainelMercado(mes) {
+  const db = getDb()
+  const [ano] = mes.split('-').map(Number)
+  const janAno = `${ano}-01-01`
+
+  const indices = {}
+  for (const [serie, label] of Object.entries(SERIES_MERCADO)) {
+    const rowMtd = db.prepare(
+      `SELECT valor FROM dados_macro WHERE serie=? AND data=?`
+    ).get(serie, mes + '-01')
+    if (!rowMtd) { indices[serie] = { label, mtd: null, ytd: null, disponivel: false }; continue }
+
+    const rowsYtd = db.prepare(
+      `SELECT valor FROM dados_macro WHERE serie=? AND data >= ? AND data <= ? ORDER BY data`
+    ).all(serie, janAno, mes + '-01')
+    const ytd = rowsYtd.length > 0
+      ? rowsYtd.reduce((p, r) => p * (1 + r.valor / 100), 1) - 1
+      : null
+
+    indices[serie] = { label, mtd: rowMtd.valor / 100, ytd, disponivel: true }
+  }
+
+  return { mes, indices }
 }
 
 // ── Otimizador de Carteira (Monte Carlo) ───────────────────

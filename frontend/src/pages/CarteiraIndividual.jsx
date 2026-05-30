@@ -4,6 +4,7 @@ import { useCarteira, useMetricas } from '../hooks/useCarteiras'
 import PeriodSelector, { resolvePeriod } from '../components/ui/PeriodSelector'
 import { MetricCard, MetricRow } from '../components/ui/MetricCard'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
+import CorrelacaoHeatmap from '../components/ui/CorrelacaoHeatmap'
 import { api } from '../services/api'
 import { clsx } from 'clsx'
 import {
@@ -82,6 +83,7 @@ export default function CarteiraIndividual() {
           { key: 'overview', label: 'Visão Geral' },
           { key: 'retorno', label: 'Retorno' },
           { key: 'risco', label: 'Risco' },
+          { key: 'correlacao', label: 'Correlação' },
           { key: 'atribuicao', label: 'Atribuição' },
           { key: 'passiva', label: 'vs. Passiva' },
           { key: 'otimizador', label: 'Otimizador' },
@@ -112,6 +114,7 @@ export default function CarteiraIndividual() {
           {tab === 'overview' && <OverviewTab metricas={metricas} />}
           {tab === 'retorno' && <RetornoTab metricas={metricas} />}
           {tab === 'risco' && <RiscoTab metricas={metricas} />}
+          {tab === 'correlacao' && <CorrelacaoTab carteiraId={id} period={period} />}
           {tab === 'atribuicao' && <AtribuicaoTab carteiraId={id} period={period} />}
           {tab === 'passiva' && <PassivaTab carteiraId={id} period={period} />}
         </>
@@ -317,25 +320,93 @@ function RetornoTab({ metricas }) {
 
 function RiscoTab({ metricas }) {
   const m = metricas
+  const fmtPct2 = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`
   return (
     <div className="grid grid-cols-2 gap-4">
-      <div className="card space-y-0.5">
-        <div className="text-sm font-medium text-slate-300 mb-3">Métricas de Risco</div>
-        <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
-          tooltip="Desvio padrão dos retornos mensais, anualizado (× √12). Mede a dispersão dos resultados em torno da média — quanto maior, mais imprevisível a rentabilidade." />
-        <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
-          tooltip="Maior queda percentual do pico ao vale registrada no período. Mede o pior cenário de perda que um investidor poderia ter sofrido." />
-        <MetricRow label="Duração MDD (meses)" value={m.mdd_duracao ?? '—'}
-          tooltip="Número de meses desde o pico até o fundo do maior drawdown. Indica por quanto tempo a carteira ficou em queda contínua." />
-        <MetricRow label="Recuperação (meses)" value={m.mdd_recuperacao ?? 'N/A'}
-          tooltip="Número de meses para recuperar o patamar anterior ao maior drawdown. Não disponível se a recuperação ainda não ocorreu no período." />
-        <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
-          tooltip="Retorno excedente ao CDI dividido pela volatilidade total (positiva e negativa). Mede eficiência por unidade de risco total. Acima de 0 = melhor que CDI ajustado ao risco." />
-        <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
-          tooltip="Como o Sharpe, mas usa apenas a volatilidade negativa (downside deviation). Penaliza somente as oscilações para baixo, ignorando a volatilidade positiva." />
-        <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
-          tooltip="CAGR dividido pelo módulo do Max Drawdown. Responde: quantos % de retorno anual a carteira entrega para cada % de queda máxima suportada." />
+      <div className="space-y-4">
+        <div className="card space-y-0.5">
+          <div className="text-sm font-medium text-slate-300 mb-3">Volatilidade e Drawdown</div>
+          <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
+            tooltip="Desvio padrão dos retornos mensais, anualizado (× √12)." />
+          <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+            tooltip="Maior queda percentual do pico ao vale registrada no período." />
+          <MetricRow label="Duração MDD (dias úteis)" value={m.mdd_duracao ?? '—'}
+            tooltip="Dias úteis desde o pico até o fundo do maior drawdown." />
+          <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
+            tooltip="Retorno excedente ao CDI dividido pela volatilidade total." />
+          <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+            tooltip="Como o Sharpe, mas penaliza apenas a volatilidade negativa (downside deviation)." />
+          <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+            tooltip="CAGR / |Max Drawdown|. Retorno anual por unidade de queda máxima." />
+        </div>
+
+        <div className="card space-y-0.5">
+          <div className="text-sm font-medium text-slate-300 mb-3">VaR / CVaR Histórico (mensal)</div>
+          <MetricRow label="VaR 95%" value={fmtPct2(m.var_95)} highlight={-1}
+            tooltip="Em 95% dos meses, a perda não superou este valor. Calculado como o percentil 5% dos retornos mensais." />
+          <MetricRow label="CVaR 95%" value={fmtPct2(m.cvar_95)} highlight={-1}
+            tooltip="Perda média esperada nos 5% piores meses. Mais conservador que o VaR." />
+          <MetricRow label="VaR 99%" value={fmtPct2(m.var_99)} highlight={-1}
+            tooltip="Em 99% dos meses, a perda não superou este valor (percentil 1%)." />
+          <MetricRow label="CVaR 99%" value={fmtPct2(m.cvar_99)} highlight={-1}
+            tooltip="Perda média esperada no 1% pior dos meses." />
+        </div>
       </div>
+
+      <div className="space-y-4">
+        <div className="card space-y-0.5">
+          <div className="text-sm font-medium text-slate-300 mb-3">vs. IBOV</div>
+          {!m.ibov_disponivel && (
+            <p className="text-xs text-slate-500">Dados insuficientes de IBOV no período (&lt; 12 meses de overlap).</p>
+          )}
+          <MetricRow label="Beta" value={m.beta_ibov?.toFixed(2) ?? '—'}
+            tooltip="Sensibilidade da carteira ao IBOV. Beta=1 move igual ao índice; <1 menos sensível; >1 amplifica os movimentos." />
+          <MetricRow label="Up Capture" value={m.up_capture != null ? `${(m.up_capture * 100).toFixed(0)}%` : '—'}
+            tooltip="Quanto a carteira capturou dos meses de alta do IBOV. Acima de 100% = superou o índice nas altas." />
+          <MetricRow label="Down Capture" value={m.down_capture != null ? `${(m.down_capture * 100).toFixed(0)}%` : '—'}
+            tooltip="Quanto a carteira capturou das quedas do IBOV. Abaixo de 100% = perdeu menos que o índice nas baixas." />
+        </div>
+
+        <div className="card space-y-0.5">
+          <div className="text-sm font-medium text-slate-300 mb-3">Retorno por Janela</div>
+          <MetricRow label="Mês atual (MTD)" value={fmtPct2(m.retorno_mtd)} highlight={m.retorno_mtd} />
+          <MetricRow label="Ano (YTD)" value={fmtPct2(m.retorno_ytd)} highlight={m.retorno_ytd} />
+          <MetricRow label="12 meses" value={fmtPct2(m.retorno_12m)} highlight={m.retorno_12m} />
+          <MetricRow label="24 meses" value={fmtPct2(m.retorno_24m)} highlight={m.retorno_24m} />
+          <MetricRow label="Desde o início" value={fmtPct(m.retorno_acumulado)} highlight={m.retorno_acumulado} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CorrelacaoTab({ carteiraId, period }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = {}
+    if (period?.start) params.start = period.start
+    if (period?.end) params.end = period.end
+    api.getCorrelacao(carteiraId, params)
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [carteiraId, period?.start, period?.end])
+
+  if (loading) return <LoadingSpinner text="Calculando correlações..." />
+  if (!data) return <p className="text-slate-500 text-sm py-8 text-center">Dados insuficientes para calcular correlação (mínimo 12 meses por classe).</p>
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <div className="text-sm font-medium text-slate-300">Matriz de Correlação entre Classes</div>
+        <p className="text-xs text-slate-500 mt-0.5">{data.n_meses} meses · Correlação de Pearson sobre retornos mensais</p>
+      </div>
+      <CorrelacaoHeatmap classes={data.classes} labels={data.labels} matrix={data.matrix} />
     </div>
   )
 }

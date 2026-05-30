@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useCarteiras } from '../hooks/useCarteiras'
@@ -55,6 +55,8 @@ export default function Dashboard() {
           {syncMsg}
         </div>
       )}
+
+      <PainelMercado />
 
       {loadingCarteiras ? (
         <LoadingSpinner text="Carregando carteiras..." />
@@ -199,4 +201,43 @@ function groupByPerfil(carteiras) {
 function fmtPct(v) {
   if (v == null) return '—'
   return `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`
+}
+
+function PainelMercado() {
+  const [data, setData] = useState(null)
+
+  useEffect(() => {
+    const mes = new Date().toISOString().slice(0, 7)
+    api.getMercado(mes).then(setData).catch(() => {})
+  }, [])
+
+  if (!data) return null
+
+  const indices = Object.entries(data.indices).filter(([, v]) => v.disponivel)
+  if (indices.length === 0) return null
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-medium text-slate-300">Mercado — {data.mes}</div>
+        <span className="text-[10px] text-slate-500">MTD / YTD</span>
+      </div>
+      <div className="grid grid-cols-4 gap-2 lg:grid-cols-7">
+        {indices.map(([serie, idx]) => (
+          <div key={serie} className="bg-bg-secondary rounded-lg p-2.5 text-center">
+            <div className="text-[10px] text-slate-500 mb-1">{idx.label}</div>
+            <div className={clsx('text-sm font-mono font-semibold',
+              idx.mtd >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+              {fmtPct(idx.mtd)}
+            </div>
+            <div className={clsx('text-[10px] font-mono mt-0.5',
+              idx.ytd == null ? 'text-slate-600'
+              : idx.ytd >= 0 ? 'text-accent-green/70' : 'text-accent-red/70')}>
+              {idx.ytd != null ? fmtPct(idx.ytd) : '—'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

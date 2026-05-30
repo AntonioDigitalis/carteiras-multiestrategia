@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getDb } from '../db/database.js'
-import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel } from '../services/calculator.js'
+import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel, calcularCorrelacao, calcularPainelMercado } from '../services/calculator.js'
 import { garantirDadosMacro, fetchHistoricoBrapi } from '../services/external.js'
 
 const router = Router()
@@ -18,6 +18,19 @@ function validateDateRange(start, end, res) {
   return true
 }
 
+// GET /api/carteiras/mercado?mes=YYYY-MM  (deve ficar ANTES de /:id)
+router.get('/mercado', (req, res) => {
+  try {
+    const mes = req.query.mes || new Date().toISOString().slice(0, 7)
+    if (!/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'mes deve ser YYYY-MM' })
+    const data = calcularPainelMercado(mes)
+    res.json(data)
+  } catch (e) {
+    console.error('[mercado]', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // GET /api/carteiras
 router.get('/', (req, res) => {
   const db = getDb()
@@ -31,6 +44,18 @@ router.get('/', (req, res) => {
 })
 
 // GET /api/carteiras/:id
+router.get('/mercado', async (req, res) => {
+  try {
+    const mes = req.query.mes || new Date().toISOString().slice(0, 7)
+    await garantirDadosMacro(mes + '-01', mes + '-28')
+    const painel = calcularPainelMercado(mes)
+    res.json(painel)
+  } catch (e) {
+    console.error('[mercado]', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.get('/:id', (req, res) => {
   const db = getDb()
   const row = db.prepare(`
@@ -286,6 +311,23 @@ router.get('/:id/metricas', async (req, res) => {
     res.json(metricas)
   } catch (e) {
     console.error('[metricas]', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// GET /api/carteiras/:id/correlacao
+router.get('/:id/correlacao', async (req, res) => {
+  try {
+    const { start, end } = req.query
+    if (!validateDateRange(start, end, res)) return
+    const efStart = start || '2020-01-01'
+    const efEnd = end || new Date().toISOString().split('T')[0]
+    await garantirDadosMacro(efStart, efEnd)
+    const data = calcularCorrelacao(Number(req.params.id), start || null, end || null)
+    if (!data) return res.json(null)
+    res.json(data)
+  } catch (e) {
+    console.error('[correlacao]', e)
     res.status(500).json({ error: e.message })
   }
 })
