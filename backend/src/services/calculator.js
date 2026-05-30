@@ -203,11 +203,21 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
   const mesInicio = dataInicio.slice(0, 7)
   const mesFim = dataFim.slice(0, 7)
 
-  const estados = db.prepare(`
+  let estados = db.prepare(`
     SELECT * FROM estados_portfolio
     WHERE carteira_id = ? AND mes >= ? AND mes <= ?
     ORDER BY data_inicio
   `).all(subCarteiraId, mesInicio, mesFim)
+
+  // Fallback: estado aberto do mês anterior cobrindo este período (ex: último mes='2026-04' com data_fim=NULL cobrindo maio/2026)
+  if (estados.length === 0) {
+    estados = db.prepare(`
+      SELECT * FROM estados_portfolio
+      WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+      ORDER BY data_inicio
+    `).all(subCarteiraId, dataFim, dataInicio)
+  }
+
   if (estados.length === 0) return null
 
   // Mapa mes → alocação (usa a mais recente disponível)
@@ -540,7 +550,7 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
   if (identifiers.length) {
     const ph2 = identifiers.map(() => '?').join(',')
     const rows = db.prepare(`
-      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
       FROM cotas_cache cc
       JOIN produtos p ON cc.produto_id = p.id
       WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
@@ -549,7 +559,8 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     `).all(...identifiers, bufferStr, dataFim)
     for (const r of rows) {
       if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
-      cotasMapByIdent.get(r.identificador).set(r.data, r.valor)
+      // Usa valor_ajustado quando disponível: captura dividendos no dia ex-dividend
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado || r.valor)
     }
   }
 
@@ -576,6 +587,29 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     if (alocByMes.has(mes)) return alocByMes.get(mes)
     const ant = [...alocByMes.keys()].filter((m) => m <= mes).sort()
     return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
+  }
+
+  // Pré-computa retornos diários de sub-carteiras (tipo='carteira') por mês
+  // Distribui o retorno mensal geometricamente pelos dias úteis do mês
+  const subCarteirasIds = [...new Set(
+    todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
+  )]
+  const subRetDiario = new Map() // key: `${subId}_${mes}` → retorno diário geométrico
+  if (subCarteirasIds.length > 0) {
+    const mesesNoPeriodo = [...new Set(diasUteis.map((d) => d.slice(0, 7)))]
+    for (const mes of mesesNoPeriodo) {
+      const [y, m] = mes.split('-').map(Number)
+      const inicioMes = `${mes}-01`
+      const fimMes = new Date(y, m, 0).toISOString().split('T')[0]
+      const diasDoMes = diasUteis.filter((d) => d.slice(0, 7) === mes).length
+      if (diasDoMes === 0) continue
+      for (const subId of subCarteirasIds) {
+        const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
+        if (retMensal != null) {
+          subRetDiario.set(`${subId}_${mes}`, Math.pow(1 + retMensal, 1 / diasDoMes) - 1)
+        }
+      }
+    }
   }
 
   // "Última cota conhecida" — pré-alimentado com valores do buffer
@@ -654,8 +688,10 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
                 if (Math.abs(raw) <= 0.40) retP = raw
               }
             }
+          } else if (p.tipo === 'carteira' && p.identificador) {
+            const retDiario = subRetDiario.get(`${p.identificador}_${dia.slice(0, 7)}`)
+            if (retDiario != null) retP = retDiario
           }
-          // tipo 'carteira': retorno diário ignorado (contribuição nula)
 
           if (retP !== null) retClasse += retP * ((p.peso || 0) / pesoTotal)
         }
@@ -1106,7 +1142,7 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
 
 // ── Otimizador de Carteira (Monte Carlo) ───────────────────
 
-export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000) {
+export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
   const db = getDb()
   const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
   if (!carteira) return null
@@ -1172,13 +1208,25 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
     return { vol, cagr, sharpe }
   }
 
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
   const portfolios = []
   for (let s = 0; s < nSimulacoes; s++) {
     const raw = classesAtivas.map(() => -Math.log(Math.random()))
     const sum = raw.reduce((a, b) => a + b, 0)
-    const weights = raw.map((v) => v / sum)
-    const stats = portfolioStats(weights)
-    portfolios.push({ weights, ...stats })
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    // Clamp ao máximo: redistribui o excesso proporcionalmente aos ativos livres
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) break
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
+    portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
@@ -1188,21 +1236,46 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const toWeightMap = (p) =>
     classesAtivas.reduce((o, cls, i) => ({ ...o, [cls]: p.weights[i] }), {})
 
-  // Paridade de risco (Equal Risk Contribution) — algoritmo iterativo
-  // Cada classe contribui igualmente para a variância total do portfólio.
+  // ERC via active-set com restrições de mínimo e máximo
   const pesosRP = (() => {
-    let w = Array(n).fill(1 / n)
-    for (let iter = 0; iter < 300; iter++) {
-      // Contribuição marginal ao risco: (Σ·w)_i
-      const mrc = w.map((_, i) => w.reduce((s, wj, j) => s + cov[i][j] * wj, 0))
-      const totalVar = w.reduce((s, wi, i) => s + wi * mrc[i], 0)
-      if (totalVar <= 0) break
-      // Novos pesos proporcionais à contribuição-alvo / contribuição-atual
-      const newW = w.map((wi, i) => mrc[i] > 0 ? wi * Math.sqrt(1 / (n * wi * mrc[i] / totalVar)) : wi)
-      const sum = newW.reduce((a, b) => a + b, 0)
-      w = newW.map(v => v / sum)
+    const result = Array(n).fill(0)
+    const fixed = new Set()
+    let budget = 1
+
+    while (true) {
+      const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
+      const m = freeIdx.length
+      if (m === 0) break
+      if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
+
+      const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      let subW = Array(m).fill(1 / m)
+      for (let iter = 0; iter < 300; iter++) {
+        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+        if (totalVar <= 0) break
+        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
+        const rawSum = newSubW.reduce((a, b) => a + b, 0)
+        subW = newSubW.map(v => v / rawSum)
+      }
+      freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
+
+      const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
+      if (minViolI.length > 0) {
+        const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
+        result[worstI] = minW; budget -= minW; fixed.add(worstI)
+        if (budget <= 1e-10) break; continue
+      }
+      const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
+      if (maxViolI.length > 0) {
+        const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
+        result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
+        if (budget <= 1e-10) break; continue
+      }
+      break
     }
-    return w
+
+    return result
   })()
 
   return {
@@ -1220,7 +1293,7 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
 
 // ── Otimizador por Ativo (Monte Carlo hierárquico) ─────────
 
-export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000) {
+export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
   const db = getDb()
 
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
@@ -1351,17 +1424,70 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     return { vol, cagr, sharpe }
   }
 
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
   const portfolios = []
   for (let s = 0; s < nSimulacoes; s++) {
     const raw = ativosValidos.map(() => -Math.log(Math.random()))
     const sum = raw.reduce((a, b) => a + b, 0)
-    const weights = raw.map((v) => v / sum)
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) break
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
     portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
   const minVol = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
   const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
+
+  const pesosRP = (() => {
+    const result = Array(n).fill(0)
+    const fixed = new Set()
+    let budget = 1
+
+    while (true) {
+      const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
+      const m = freeIdx.length
+      if (m === 0) break
+      if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
+
+      const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      let subW = Array(m).fill(1 / m)
+      for (let iter = 0; iter < 300; iter++) {
+        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+        if (totalVar <= 0) break
+        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
+        const rawSum = newSubW.reduce((a, b) => a + b, 0)
+        subW = newSubW.map(v => v / rawSum)
+      }
+      freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
+
+      const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
+      if (minViolI.length > 0) {
+        const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
+        result[worstI] = minW; budget -= minW; fixed.add(worstI)
+        if (budget <= 1e-10) break; continue
+      }
+      const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
+      if (maxViolI.length > 0) {
+        const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
+        result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
+        if (budget <= 1e-10) break; continue
+      }
+      break
+    }
+
+    return result
+  })()
 
   return {
     classe,
@@ -1374,6 +1500,7 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
     max_sharpe: { ...maxSharpe, weights: toWeightMap(maxSharpe) },
     min_vol: { ...minVol, weights: toWeightMap(minVol) },
+    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
     atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
     n_meses: T,
     n_simulacoes: nSimulacoes,

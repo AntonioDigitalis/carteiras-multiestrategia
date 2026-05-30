@@ -679,6 +679,8 @@ function OtimizadorMacro({ carteiraId, period }) {
   const [resultado, setResultado] = useState(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
+  const [minPeso, setMinPeso] = useState(0)
+  const [maxPeso, setMaxPeso] = useState(0)
 
   async function otimizar() {
     setLoading(true); setErro(null); setResultado(null)
@@ -686,6 +688,8 @@ function OtimizadorMacro({ carteiraId, period }) {
       const params = {}
       if (period?.start) params.start = period.start
       if (period?.end) params.end = period.end
+      if (minPeso > 0) params.min_peso = minPeso
+      if (maxPeso > 0) params.max_peso = maxPeso
       const data = await api.otimizar(carteiraId, params)
       if (data?.error) { setErro(data.error); return }
       setResultado(data)
@@ -700,6 +704,25 @@ function OtimizadorMacro({ carteiraId, period }) {
         <p className="text-xs text-slate-500 mb-4">
           Simula {(5000).toLocaleString()} combinações de pesos entre as classes de ativos e identifica os portfólios de máximo Sharpe e mínima volatilidade.
         </p>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Mín. por classe (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={minPeso}
+              onChange={(e) => setMinPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Máx. por classe (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={maxPeso}
+              onChange={(e) => setMaxPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <span className="text-[10px] text-slate-600">0 = sem restrição</span>
+        </div>
         <button onClick={otimizar} disabled={loading} className="btn-primary flex items-center gap-2">
           {loading ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Otimizando...</> : 'Otimizar Carteira'}
         </button>
@@ -768,6 +791,8 @@ function OtimizadorAtivo({ carteiraId, period }) {
   const [resultado, setResultado] = useState(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState(null)
+  const [minPeso, setMinPeso] = useState(0)
+  const [maxPeso, setMaxPeso] = useState(0)
 
   async function carregarAtivos(cls) {
     setLoadingAtivos(true)
@@ -814,6 +839,8 @@ function OtimizadorAtivo({ carteiraId, period }) {
       const body = { classe, ativos, n_simulacoes: 5000 }
       if (period?.start) body.start = period.start
       if (period?.end) body.end = period.end
+      if (minPeso > 0) body.min_peso = minPeso
+      if (maxPeso > 0) body.max_peso = maxPeso
       const data = await api.otimizarClasse(carteiraId, body)
       if (data?.error) { setErro(data.error); return }
       setResultado(data)
@@ -836,7 +863,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
           <select
             value={classe}
             onChange={(e) => setClasse(e.target.value)}
-            className="bg-surface border border-border rounded px-3 py-1.5 text-xs text-slate-200 w-full"
+            className="bg-bg-tertiary border border-border rounded px-3 py-1.5 text-xs text-slate-200 w-full"
           >
             {Object.entries(LABELS_CLASSE_OT).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
@@ -883,6 +910,26 @@ function OtimizadorAtivo({ carteiraId, period }) {
           {addErro && <div className="mt-1 text-xs text-accent-red">{addErro}</div>}
         </div>
 
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Mín. por ativo (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={minPeso}
+              onChange={(e) => setMinPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500 whitespace-nowrap">Máx. por ativo (%)</label>
+            <input
+              type="number" min={0} max={100} step={1} value={maxPeso}
+              onChange={(e) => setMaxPeso(Math.max(0, Number(e.target.value)))}
+              className="w-16 bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent-blue"
+            />
+          </div>
+          <span className="text-[10px] text-slate-600">0 = sem restrição</span>
+        </div>
+
         <button onClick={otimizar} disabled={loading || ativos.length < 2} className="btn-primary flex items-center gap-2">
           {loading ? <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Otimizando...</> : 'Otimizar Ativos'}
         </button>
@@ -914,9 +961,12 @@ function OtimizadorAtivo({ carteiraId, period }) {
             <FronteiraChart resultado={resultado} />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <PesosAtivoCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} ativos={resultado.ativos.filter((a) => a.valido)} />
             <PesosAtivoCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} ativos={resultado.ativos.filter((a) => a.valido)} />
+            {resultado.paridade_risco && (
+              <PesosAtivoCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} ativos={resultado.ativos.filter((a) => a.valido)} />
+            )}
           </div>
 
           <div className="card overflow-x-auto">
@@ -928,6 +978,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.atual }}>Atual</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.max_sharpe }}>Máx. Sharpe</th>
                   <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.min_vol }}>Mín. Vol.</th>
+                  {resultado.paridade_risco && <th className="text-right pb-2 font-medium" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>Par. Risco</th>}
                 </tr>
               </thead>
               <tbody>
@@ -941,6 +992,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
                     <td className="py-2 text-right font-mono text-slate-300">{fmt(resultado.atual[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-green">{fmt(resultado.max_sharpe[key]) ?? '—'}</td>
                     <td className="py-2 text-right font-mono text-accent-yellow">{fmt(resultado.min_vol[key]) ?? '—'}</td>
+                    {resultado.paridade_risco && <td className="py-2 text-right font-mono" style={{ color: CORES_OTIMIZADOR.paridade_risco }}>{fmt(resultado.paridade_risco[key]) ?? '—'}</td>}
                   </tr>
                 ))}
               </tbody>

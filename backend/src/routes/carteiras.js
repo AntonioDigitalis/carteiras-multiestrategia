@@ -306,8 +306,8 @@ router.get('/:id/passiva', async (req, res) => {
 // POST /api/carteiras/:id/otimizar
 router.post('/:id/otimizar', (req, res) => {
   try {
-    const { start, end, n_simulacoes } = req.body
-    const data = otimizarCarteira(Number(req.params.id), start || null, end || null, n_simulacoes || 5000)
+    const { start, end, n_simulacoes, min_peso, max_peso } = req.body
+    const data = otimizarCarteira(Number(req.params.id), start || null, end || null, n_simulacoes || 5000, (min_peso || 0) / 100, (max_peso || 100) / 100)
     if (!data) return res.json(null)
     res.json(data)
   } catch (e) {
@@ -322,13 +322,24 @@ router.get('/:id/ativos-classe', (req, res) => {
   if (!classe) return res.status(400).json({ error: 'classe obrigatória' })
   try {
     const db = getDb()
+    // Usa o nome do estado mais recente para cada identificador (evita duplicatas
+    // quando o mesmo ticker tem nomes diferentes em estados distintos, ex: CPLE6→CPLE3)
     const ativos = db.prepare(`
-      SELECT DISTINCT p.nome, p.identificador, p.tipo, p.classe
+      WITH max_mes AS (
+        SELECT p.identificador, MAX(ep.mes) AS mes
+        FROM produtos p
+        JOIN estados_portfolio ep ON p.estado_id = ep.id
+        WHERE ep.carteira_id = ? AND p.classe = ? AND p.identificador IS NOT NULL
+        GROUP BY p.identificador
+      )
+      SELECT p.nome, p.identificador, p.tipo, p.classe
       FROM produtos p
       JOIN estados_portfolio ep ON p.estado_id = ep.id
-      WHERE ep.carteira_id = ? AND p.classe = ? AND p.identificador IS NOT NULL
+      JOIN max_mes mm ON p.identificador = mm.identificador AND ep.mes = mm.mes
+      WHERE ep.carteira_id = ? AND p.classe = ?
+      GROUP BY p.identificador
       ORDER BY p.nome
-    `).all(Number(req.params.id), classe)
+    `).all(Number(req.params.id), classe, Number(req.params.id), classe)
     res.json(ativos)
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -338,7 +349,7 @@ router.get('/:id/ativos-classe', (req, res) => {
 // POST /api/carteiras/:id/otimizar-classe
 router.post('/:id/otimizar-classe', async (req, res) => {
   try {
-    const { classe, ativos, n_simulacoes, start, end } = req.body
+    const { classe, ativos, n_simulacoes, start, end, min_peso, max_peso } = req.body
     if (!classe) return res.status(400).json({ error: 'classe obrigatória' })
     if (!ativos || ativos.length < 2) return res.status(400).json({ error: 'Informe ao menos 2 ativos' })
 
@@ -378,7 +389,7 @@ router.post('/:id/otimizar-classe', async (req, res) => {
 
     const data = otimizarDentroClasse(
       Number(req.params.id), classe, ativos,
-      start || null, end || null, n_simulacoes || 5000
+      start || null, end || null, n_simulacoes || 5000, (min_peso || 0) / 100, (max_peso || 100) / 100
     )
     res.json(data)
   } catch (e) {
