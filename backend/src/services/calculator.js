@@ -1150,6 +1150,41 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
   return { carteira: carteira.nome, perfil: carteira.perfil_nome, linhas, labels: LABELS_CLASSE }
 }
 
+// ── Helpers de otimização ─────────────────────────────────
+
+// Projeção no simplex com caixa {Σw=1, lo≤w≤hi} via bissecção no multiplicador τ (Duchi et al. 2008)
+function projectCappedSimplex(v, lo, hi) {
+  function sumW(tau) {
+    return v.reduce((s, vi) => s + Math.min(hi, Math.max(lo, vi - tau)), 0)
+  }
+  let tLo = Math.min(...v) - hi - 1
+  let tHi = Math.max(...v) - lo + 1
+  for (let i = 0; i < 200; i++) {
+    const tMid = (tLo + tHi) / 2
+    if (sumW(tMid) > 1) tLo = tMid; else tHi = tMid
+    if (tHi - tLo < 1e-14) break
+  }
+  const tau = (tLo + tHi) / 2
+  return v.map(vi => Math.min(hi, Math.max(lo, vi - tau)))
+}
+
+// Solver de mínima variância via gradient descent projetado (mínimo global garantido por convexidade)
+function solverMinVol(cov, n, minW, maxW, iters = 800) {
+  let w = Array(n).fill(1 / n)
+  const L = 2 * Math.max(...Array.from({ length: n }, (_, i) => cov[i][i]))
+  const lr = L > 0 ? 1 / L : 1
+  for (let it = 0; it < iters; it++) {
+    const grad = w.map((_, i) => 2 * cov[i].reduce((s, cij, j) => s + cij * w[j], 0))
+    const wNew = w.map((wi, i) => wi - lr * grad[i])
+    const wProj = projectCappedSimplex(wNew, minW, maxW)
+    let change = 0
+    for (let i = 0; i < n; i++) change = Math.max(change, Math.abs(wProj[i] - w[i]))
+    w = wProj
+    if (change < 1e-12) break
+  }
+  return w
+}
+
 // ── Otimizador de Carteira (Monte Carlo) ───────────────────
 
 export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
@@ -1247,7 +1282,13 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
-  const minVol = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
+  const minVolSample = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
+  // Dirichlet concentra-se no centróide — refina com solver convexo para garantir mínimo global
+  const pesosMinVolSolver = solverMinVol(cov, n, minW, maxW)
+  const statsMinVolSolver = portfolioStats(pesosMinVolSolver)
+  const minVol = statsMinVolSolver.vol < minVolSample.vol
+    ? { weights: pesosMinVolSolver, ...statsMinVolSolver }
+    : minVolSample
   const currentStats = portfolioStats(pesosAtuais)
 
   const toWeightMap = (p) =>
@@ -1266,15 +1307,30 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
       if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
 
       const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      // Contribuição cruzada dos ativos fixados ao MRC dos livres (constante no inner loop)
+      const fixedContrib = freeIdx.map(i =>
+        [...fixed].reduce((s, k) => s + cov[i][k] * result[k], 0)
+      )
       let subW = Array(m).fill(1 / m)
-      for (let iter = 0; iter < 300; iter++) {
-        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
-        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+      for (let iter = 0; iter < 1000; iter++) {
+        // MRC inclui covariância cruzada com ativos fixados (termos ignorados pelo código anterior)
+        const mrc = subW.map((_, ii) =>
+          budget * subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0) + fixedContrib[ii]
+        )
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * budget * mrc[ii], 0)
         if (totalVar <= 0) break
-        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
-        const rawSum = newSubW.reduce((a, b) => a + b, 0)
-        subW = newSubW.map(v => v / rawSum)
+        const newSubW = subW.map((wi, ii) =>
+          mrc[ii] > 0 && wi > 0 ? wi * Math.sqrt(totalVar / (m * budget * wi * mrc[ii])) : wi
+        )
+        let maxChange = 0
+        for (let ii = 0; ii < m; ii++) maxChange = Math.max(maxChange, Math.abs(newSubW[ii] - subW[ii]))
+        // Sem normalização intra-loop — normalizar a cada passo desloca o atrator de ERC para min-var (Spinu 2013)
+        subW = newSubW
+        if (maxChange < 1e-12) break
       }
+      // Normaliza UMA VEZ após convergência
+      const sLoop = subW.reduce((a, b) => a + b, 0)
+      if (sLoop > 1e-10) subW = subW.map(v => v / sLoop)
       freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
 
       const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
@@ -1294,9 +1350,8 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
       break
     }
 
-    // Normalização de segurança: garante soma = 1 após active-set
     const rpSum = result.reduce((a, b) => a + b, 0)
-    return rpSum > 1e-10 ? result.map(r => r / rpSum) : result
+    return rpSum > 1e-10 ? result.map(r => r / rpSum) : Array(n).fill(1 / n)
   })()
 
   return {
@@ -1472,7 +1527,12 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
   }
 
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
-  const minVol = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
+  const minVolSample = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
+  const pesosMinVolSolver = solverMinVol(cov, n, minW, maxW)
+  const statsMinVolSolver = portfolioStats(pesosMinVolSolver)
+  const minVol = statsMinVolSolver.vol < minVolSample.vol
+    ? { weights: pesosMinVolSolver, ...statsMinVolSolver }
+    : minVolSample
   const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
 
   const pesosRP = (() => {
@@ -1487,15 +1547,26 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
 
       const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+      const fixedContrib = freeIdx.map(i =>
+        [...fixed].reduce((s, k) => s + cov[i][k] * result[k], 0)
+      )
       let subW = Array(m).fill(1 / m)
-      for (let iter = 0; iter < 300; iter++) {
-        const mrc = subW.map((_, ii) => subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0))
-        const totalVar = subW.reduce((s, wi, ii) => s + wi * mrc[ii], 0)
+      for (let iter = 0; iter < 1000; iter++) {
+        const mrc = subW.map((_, ii) =>
+          budget * subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0) + fixedContrib[ii]
+        )
+        const totalVar = subW.reduce((s, wi, ii) => s + wi * budget * mrc[ii], 0)
         if (totalVar <= 0) break
-        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 ? wi * Math.sqrt(1 / (m * wi * mrc[ii] / totalVar)) : wi)
-        const rawSum = newSubW.reduce((a, b) => a + b, 0)
-        subW = newSubW.map(v => v / rawSum)
+        const newSubW = subW.map((wi, ii) =>
+          mrc[ii] > 0 && wi > 0 ? wi * Math.sqrt(totalVar / (m * budget * wi * mrc[ii])) : wi
+        )
+        let maxChange = 0
+        for (let ii = 0; ii < m; ii++) maxChange = Math.max(maxChange, Math.abs(newSubW[ii] - subW[ii]))
+        subW = newSubW
+        if (maxChange < 1e-12) break
       }
+      const sLoop = subW.reduce((a, b) => a + b, 0)
+      if (sLoop > 1e-10) subW = subW.map(v => v / sLoop)
       freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
 
       const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
@@ -1516,7 +1587,7 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     }
 
     const rpSum2 = result.reduce((a, b) => a + b, 0)
-    return rpSum2 > 1e-10 ? result.map(r => r / rpSum2) : result
+    return rpSum2 > 1e-10 ? result.map(r => r / rpSum2) : Array(n).fill(1 / n)
   })()
 
   return {
