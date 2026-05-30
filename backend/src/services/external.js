@@ -74,7 +74,11 @@ export async function fetchIHFAMensal(dataInicio, dataFim) {
     const data = await res.json()
 
     // Resposta: array de { data: 'DD/MM/YYYY', numero_indice: float }
-    const pontos = (data?.ihfa ?? data ?? [])
+    // Garante array independente do shape retornado pela ANBIMA
+    const rawList = Array.isArray(data?.ihfa) ? data.ihfa
+                  : Array.isArray(data) ? data
+                  : []
+    const pontos = rawList
       .map((p) => ({
         data: p.data.split('/').reverse().join('-'),
         valor: parseFloat(p.numero_indice ?? p.valor),
@@ -96,17 +100,23 @@ export async function fetchIHFAMensal(dataInicio, dataFim) {
       `INSERT OR REPLACE INTO dados_macro (serie, data, valor, fonte) VALUES ('IHFA_MENSAL', ?, ?, 'ANBIMA')`
     )
     let inseridos = 0
-    db.transaction(() => {
-      for (let i = 1; i < meses.length; i++) {
-        const mesData = meses[i] + '-01'
-        if (mesData < mesInicio || mesData > mesFim) continue
-        const retorno = (porMes[meses[i]] / porMes[meses[i - 1]] - 1) * 100
-        stmt.run(mesData, retorno)
-        inseridos++
-      }
-    })()
-
-    registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', inseridos, 'ok', null)
+    try {
+      db.transaction(() => {
+        for (let i = 1; i < meses.length; i++) {
+          const mesData = meses[i] + '-01'
+          if (mesData < mesInicio || mesData > mesFim) continue
+          const prev = porMes[meses[i - 1]]
+          if (!prev) continue  // índice anterior zero ou ausente — evita divisão por zero
+          const retorno = (porMes[meses[i]] / prev - 1) * 100
+          stmt.run(mesData, retorno)
+          inseridos++
+        }
+      })()
+      registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', inseridos, 'ok', null)
+    } catch (txErr) {
+      registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', 0, 'erro', txErr.message)
+      throw txErr
+    }
     return inseridos
   } catch (e) {
     registrarLog('ANBIMA_IHFA', 'IHFA_MENSAL', null, 'erro', e.message)
@@ -136,7 +146,9 @@ function registrarLog(fonte, ativo, valor, status, detalhes) {
       `INSERT INTO log_captacao (fonte, ativo, valor, status, detalhes)
        VALUES (?, ?, ?, ?, ?)`
     ).run(fonte, ativo, valor?.toString() ?? null, status, detalhes ?? null)
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[registrarLog] falha ao gravar log de captação:', e.message)
+  }
 }
 
 // ── BCB SGS ────────────────────────────────────────────────
@@ -250,7 +262,7 @@ async function fetchHistoricoAlphaVantage(ticker, dataInicio, dataFim, apiKey) {
   // Alpha Vantage usa sufixo .SAO para B3 (ex: IVVB11.SAO)
   const symbol = ticker.includes('.') ? ticker : `${ticker}.SAO`
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${apiKey}`
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0' } })
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0' }, signal: AbortSignal.timeout(15000) })
   if (!res.ok) throw new Error(`Alpha Vantage: HTTP ${res.status}`)
   const data = await res.json()
   if (data['Note']) throw new Error('Alpha Vantage: limite de requisições atingido (25/dia)')
@@ -538,8 +550,10 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
   }
 
   const stmt = db.prepare(
-    `INSERT OR IGNORE INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(produto_id, data) DO UPDATE SET
+       valor = excluded.valor, valor_ajustado = excluded.valor_ajustado, fonte = excluded.fonte`
   )
   const insertMany = db.transaction((produtoId, r) => {
     for (const row of r) stmt.run(produtoId, row.date, row.close, row.adjustedClose, fonte)
@@ -557,15 +571,18 @@ function _persistirEventosYahoo(ticker, events) {
       VALUES (?, ?, ?, ?, ?, 'yahoo')
     `)
     db.transaction(() => {
+      // Arredonda para o dia UTC mais próximo — evita off-by-one quando o
+      // timestamp do Yahoo cai em 23:xx UTC do dia anterior ao ex-date real.
+      const toUtcDate = (ts) => new Date(Math.round(ts * 1000 / 86400000) * 86400000).toISOString().split('T')[0]
       for (const ev of Object.values(events.splits || {})) {
-        const data = new Date(ev.date * 1000).toISOString().split('T')[0]
+        const data = toUtcDate(ev.date)
         const ratio = ev.numerator / ev.denominator
         const tipo = ratio > 1 ? 'split' : 'inplit'
         const descricao = `${ev.splitRatio || `${ev.numerator}:${ev.denominator}`}`
         stmt.run(ticker, data, tipo, ratio, descricao)
       }
       for (const ev of Object.values(events.dividends || {})) {
-        const data = new Date(ev.date * 1000).toISOString().split('T')[0]
+        const data = toUtcDate(ev.date)
         stmt.run(ticker, data, 'dividendo', ev.amount, `R$ ${ev.amount.toFixed(4)} por ação`)
       }
     })()

@@ -48,6 +48,7 @@ export default function PeriodSelector({ value, onChange }) {
 
   function applyCustom() {
     if (customStart && customEnd) {
+      if (customStart > customEnd) return  // período invertido — ignora silenciosamente
       onChange({ preset: 'CUSTOM', start: customStart, end: customEnd })
       setShowCustom(false)
     }

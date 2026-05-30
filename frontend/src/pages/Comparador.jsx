@@ -195,9 +195,9 @@ function ResultadoComparacao({ dados }) {
           <tbody>
             {metricas.map(({ key, label, fmt, bigger }) => {
               const values = dados.map((d) => d[key])
-              const best = bigger
-                ? Math.max(...values.filter((v) => v != null))
-                : Math.min(...values.filter((v) => v != null))
+              const nonNull = values.filter((v) => v != null)
+              const best = nonNull.length === 0 ? null
+                : bigger ? Math.max(...nonNull) : Math.min(...nonNull)
 
               return (
                 <tr key={key} className="border-b border-border/30">

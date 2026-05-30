@@ -5,6 +5,19 @@ import { garantirDadosMacro, fetchHistoricoBrapi } from '../services/external.js
 
 const router = Router()
 
+// Previne syncs concorrentes do mesmo ticker (TOCTOU entre requests simultâneos)
+const _syncInProgress = new Set()
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+function isValidDate(s) {
+  return typeof s === 'string' && DATE_RE.test(s) && !isNaN(Date.parse(s))
+}
+function validateDateRange(start, end, res) {
+  if (start && !isValidDate(start)) { res.status(400).json({ error: 'start deve ser YYYY-MM-DD' }); return false }
+  if (end   && !isValidDate(end))   { res.status(400).json({ error: 'end deve ser YYYY-MM-DD' });   return false }
+  return true
+}
+
 // GET /api/carteiras
 router.get('/', (req, res) => {
   const db = getDb()
@@ -264,6 +277,7 @@ router.post('/:id/estados', (req, res) => {
 router.get('/:id/metricas', async (req, res) => {
   try {
     const { start, end } = req.query
+    if (!validateDateRange(start, end, res)) return
     const efStart = start || '2020-01-01'
     const efEnd = end || new Date().toISOString().split('T')[0]
     await garantirDadosMacro(efStart, efEnd)
@@ -280,6 +294,7 @@ router.get('/:id/metricas', async (req, res) => {
 router.get('/:id/atribuicao', (req, res) => {
   try {
     const { start, end } = req.query
+    if (!validateDateRange(start, end, res)) return
     const data = calcularAtribuicao(Number(req.params.id), start || null, end || null)
     res.json(data)
   } catch (e) {
@@ -291,6 +306,7 @@ router.get('/:id/atribuicao', (req, res) => {
 router.get('/:id/passiva', async (req, res) => {
   try {
     const { start, end } = req.query
+    if (!validateDateRange(start, end, res)) return
     const efStart = start || '2020-01-01'
     const efEnd = end || new Date().toISOString().split('T')[0]
     await garantirDadosMacro(efStart, efEnd)
@@ -307,7 +323,12 @@ router.get('/:id/passiva', async (req, res) => {
 router.post('/:id/otimizar', (req, res) => {
   try {
     const { start, end, n_simulacoes, min_peso, max_peso } = req.body
-    const data = otimizarCarteira(Number(req.params.id), start || null, end || null, n_simulacoes || 5000, (min_peso || 0) / 100, (max_peso || 100) / 100)
+    const minP = min_peso ?? 0
+    const maxP = max_peso ?? 100
+    if (minP < 0 || minP > 100) return res.status(400).json({ error: 'min_peso deve estar entre 0 e 100' })
+    if (maxP < 0 || maxP > 100) return res.status(400).json({ error: 'max_peso deve estar entre 0 e 100' })
+    if (minP > maxP) return res.status(400).json({ error: `min_peso (${minP}%) não pode ser maior que max_peso (${maxP}%)` })
+    const data = otimizarCarteira(Number(req.params.id), start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100)
     if (!data) return res.json(null)
     res.json(data)
   } catch (e) {
@@ -331,13 +352,18 @@ router.get('/:id/ativos-classe', (req, res) => {
         JOIN estados_portfolio ep ON p.estado_id = ep.id
         WHERE ep.carteira_id = ? AND p.classe = ? AND p.identificador IS NOT NULL
         GROUP BY p.identificador
+      ),
+      max_estado AS (
+        SELECT p.identificador, MAX(ep.id) AS estado_id
+        FROM produtos p
+        JOIN estados_portfolio ep ON p.estado_id = ep.id
+        JOIN max_mes mm ON p.identificador = mm.identificador AND ep.mes = mm.mes
+        WHERE ep.carteira_id = ? AND p.classe = ?
+        GROUP BY p.identificador
       )
       SELECT p.nome, p.identificador, p.tipo, p.classe
       FROM produtos p
-      JOIN estados_portfolio ep ON p.estado_id = ep.id
-      JOIN max_mes mm ON p.identificador = mm.identificador AND ep.mes = mm.mes
-      WHERE ep.carteira_id = ? AND p.classe = ?
-      GROUP BY p.identificador
+      JOIN max_estado me ON p.estado_id = me.estado_id AND p.identificador = me.identificador
       ORDER BY p.nome
     `).all(Number(req.params.id), classe, Number(req.params.id), classe)
     res.json(ativos)
@@ -352,6 +378,11 @@ router.post('/:id/otimizar-classe', async (req, res) => {
     const { classe, ativos, n_simulacoes, start, end, min_peso, max_peso } = req.body
     if (!classe) return res.status(400).json({ error: 'classe obrigatória' })
     if (!ativos || ativos.length < 2) return res.status(400).json({ error: 'Informe ao menos 2 ativos' })
+    const minP = min_peso ?? 0
+    const maxP = max_peso ?? 100
+    if (minP < 0 || minP > 100) return res.status(400).json({ error: 'min_peso deve estar entre 0 e 100' })
+    if (maxP < 0 || maxP > 100) return res.status(400).json({ error: 'max_peso deve estar entre 0 e 100' })
+    if (minP > maxP) return res.status(400).json({ error: `min_peso (${minP}%) não pode ser maior que max_peso (${maxP}%)` })
 
     const db = getDb()
     const hoje = new Date().toISOString().split('T')[0]
@@ -366,15 +397,21 @@ router.post('/:id/otimizar-classe', async (req, res) => {
          WHERE p.identificador = ?`
       ).get(ativo.identificador).n
 
-      if (temDados === 0) {
+      if (temDados === 0 && !_syncInProgress.has(ativo.identificador)) {
+        _syncInProgress.add(ativo.identificador)
+        let produtoId = null
         try {
-          // Cria produto temporário ligado ao primeiro estado desta carteira
+          // Cria produto temporário ligado ao estado mais recente desta carteira
           const estadoRef = db.prepare(
-            `SELECT id FROM estados_portfolio WHERE carteira_id = ? ORDER BY mes LIMIT 1`
+            `SELECT id FROM estados_portfolio WHERE carteira_id = ? ORDER BY mes DESC, data_inicio DESC LIMIT 1`
           ).get(Number(req.params.id))
-          if (!estadoRef) continue
+          if (!estadoRef) {
+            console.warn(`[otimizar-classe] carteira ${req.params.id} sem estados — sync de ${ativo.identificador} ignorado`)
+            _syncInProgress.delete(ativo.identificador)
+            continue
+          }
 
-          const produtoId = db.prepare(
+          produtoId = db.prepare(
             `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso)
              VALUES (?, ?, ?, ?, ?, 0)`
           ).run(estadoRef.id, ativo.nome || ativo.identificador, ativo.identificador, ativo.tipo, classe).lastInsertRowid
@@ -382,14 +419,17 @@ router.post('/:id/otimizar-classe', async (req, res) => {
           const { rows, insertMany } = await fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje)
           insertMany(produtoId, rows)
         } catch (e) {
+          if (produtoId) db.prepare('DELETE FROM produtos WHERE id = ?').run(produtoId)
           console.warn(`[otimizar-classe] sync ${ativo.identificador}: ${e.message}`)
+        } finally {
+          _syncInProgress.delete(ativo.identificador)
         }
       }
     }
 
     const data = otimizarDentroClasse(
       Number(req.params.id), classe, ativos,
-      start || null, end || null, n_simulacoes || 5000, (min_peso || 0) / 100, (max_peso || 100) / 100
+      start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100
     )
     res.json(data)
   } catch (e) {
@@ -454,7 +494,9 @@ router.get('/:id/exportar-excel', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, ws3, 'Acumulado por Classe')
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
-    const nomeArquivo = `${dados.carteira.replace(/\s+/g, '_')}_${start || 'inicio'}_${end || 'hoje'}.xlsx`
+    // Remove chars que quebram headers HTTP (aspas, barras, CR/LF) antes de interpolar no Content-Disposition
+    const nomeBase = dados.carteira.replace(/[^\w\s\-]/g, '').replace(/\s+/g, '_')
+    const nomeArquivo = `${nomeBase}_${start || 'inicio'}_${end || 'hoje'}.xlsx`
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`)
     res.send(buf)

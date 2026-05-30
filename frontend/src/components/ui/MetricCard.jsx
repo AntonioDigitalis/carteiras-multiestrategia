@@ -37,7 +37,7 @@ export function MetricCard({ title, value, subtitle, trend, tooltip, format = 't
           !isPositive && !isNegative && 'text-slate-100'
         )}
       >
-        {value ?? '—'}
+        {(value == null || value === 'NaN') ? '—' : value}
       </div>
       {subtitle && (
         <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
@@ -69,7 +69,7 @@ export function MetricRow({ label, value, highlight, tooltip }) {
           !isPositive && !isNegative && 'text-slate-300'
         )}
       >
-        {value ?? '—'}
+        {(value == null || value === 'NaN') ? '—' : value}
       </span>
     </div>
   )

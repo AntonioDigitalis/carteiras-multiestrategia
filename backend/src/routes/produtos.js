@@ -95,7 +95,8 @@ router.put('/:id', async (req, res) => {
         if (tipo === 'fundo') {
           const cotas = await fetchCotaFundo(identificador, dataInicio, hoje)
           const stmt = db.prepare(
-            'INSERT OR IGNORE INTO cotas_cache (produto_id, data, valor, fonte) VALUES (?, ?, ?, ?)'
+            `INSERT INTO cotas_cache (produto_id, data, valor, fonte) VALUES (?, ?, ?, ?)
+             ON CONFLICT(produto_id, data) DO UPDATE SET valor = excluded.valor, fonte = excluded.fonte`
           )
           db.transaction(() => {
             for (const c of cotas) {

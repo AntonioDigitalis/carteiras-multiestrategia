@@ -737,7 +737,7 @@ function OtimizadorMacro({ carteiraId, period }) {
             <FronteiraChart resultado={resultado} />
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <PesosCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} classes={resultado.classes} labels={resultado.labels} />
+            <PesosCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${Number.isFinite(resultado.max_sharpe.sharpe) ? resultado.max_sharpe.sharpe.toFixed(2) : '—'}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} classes={resultado.classes} labels={resultado.labels} />
             <PesosCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} classes={resultado.classes} labels={resultado.labels} />
             {resultado.paridade_risco && (
               <PesosCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} classes={resultado.classes} labels={resultado.labels} />
@@ -794,17 +794,18 @@ function OtimizadorAtivo({ carteiraId, period }) {
   const [minPeso, setMinPeso] = useState(0)
   const [maxPeso, setMaxPeso] = useState(0)
 
-  async function carregarAtivos(cls) {
+  useEffect(() => {
+    let cancelled = false
     setLoadingAtivos(true)
     setResultado(null)
-    try {
-      const data = await api.getAtivosClasse(carteiraId, cls)
-      setAtivos(data)
-    } catch (e) { /* silencioso */ }
-    finally { setLoadingAtivos(false) }
-  }
-
-  useEffect(() => { carregarAtivos(classe) }, [classe, carteiraId])
+    setMinPeso(0)
+    setMaxPeso(0)
+    api.getAtivosClasse(carteiraId, classe)
+      .then((data) => { if (!cancelled) setAtivos(data) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingAtivos(false) })
+    return () => { cancelled = true }
+  }, [classe, carteiraId])
 
   async function adicionarAtivo() {
     const id = novoId.trim()
@@ -812,7 +813,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
     if (ativos.some((a) => a.identificador === id)) { setAddErro('Ativo já está na lista'); return }
     setAddLoading(true); setAddErro(null)
     try {
-      const isCNPJ = id.includes('/')
+      const isCNPJ = id.replace(/\D/g, '').length === 14
       let nome = id
       let tipo = 'acao'
       if (isCNPJ) {
@@ -834,6 +835,10 @@ function OtimizadorAtivo({ carteiraId, period }) {
 
   async function otimizar() {
     if (ativos.length < 2) { setErro('Adicione ao menos 2 ativos'); return }
+    if (minPeso > 0 && minPeso * ativos.length > 100) {
+      setErro(`Mín. ${minPeso}% × ${ativos.length} ativos = ${minPeso * ativos.length}% — impossível somar 100%. Reduza o mínimo.`)
+      return
+    }
     setLoading(true); setErro(null); setResultado(null)
     try {
       const body = { classe, ativos, n_simulacoes: 5000 }
@@ -961,8 +966,8 @@ function OtimizadorAtivo({ carteiraId, period }) {
             <FronteiraChart resultado={resultado} />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <PesosAtivoCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${resultado.max_sharpe.sharpe.toFixed(2)}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} ativos={resultado.ativos.filter((a) => a.valido)} />
+          <div className={`grid gap-4 ${resultado.paridade_risco ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <PesosAtivoCard titulo="Máximo Sharpe" subtitulo={`Sharpe: ${Number.isFinite(resultado.max_sharpe.sharpe) ? resultado.max_sharpe.sharpe.toFixed(2) : '—'}`} cor={CORES_OTIMIZADOR.max_sharpe} portfolio={resultado.max_sharpe} ativos={resultado.ativos.filter((a) => a.valido)} />
             <PesosAtivoCard titulo="Mínima Volatilidade" subtitulo={`Vol: ${fmtPct(resultado.min_vol.vol)}`} cor={CORES_OTIMIZADOR.min_vol} portfolio={resultado.min_vol} ativos={resultado.ativos.filter((a) => a.valido)} />
             {resultado.paridade_risco && (
               <PesosAtivoCard titulo="Paridade de Risco" subtitulo={`Vol: ${fmtPct(resultado.paridade_risco.vol)}`} cor={CORES_OTIMIZADOR.paridade_risco} portfolio={resultado.paridade_risco} ativos={resultado.ativos.filter((a) => a.valido)} />
@@ -1014,7 +1019,8 @@ function PesosAtivoCard({ titulo, subtitulo, cor, portfolio, ativos }) {
       <div className="text-xs text-slate-500 mb-3">{subtitulo}</div>
       <div className="space-y-2">
         {ativos.map((a) => {
-          const w = (portfolio.weights[a.identificador] || 0) * 100
+          if (!a.identificador) return null
+          const w = (portfolio.weights[a.identificador] ?? 0) * 100
           return (
             <div key={a.identificador}>
               <div className="flex justify-between text-xs mb-0.5">

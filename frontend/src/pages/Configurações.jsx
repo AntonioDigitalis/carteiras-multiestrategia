@@ -122,11 +122,21 @@ export default function Configurações() {
   }
 
   async function doImport(file, modo) {
+    if (modo === 'substituir') {
+      const ok = window.confirm(
+        'ATENÇÃO: Esta ação irá APAGAR todos os dados locais (carteiras, produtos, histórico de cotas e alocações) e substituí-los pelo arquivo importado.\n\nEsta operação não pode ser desfeita. Deseja continuar?'
+      )
+      if (!ok) {
+        setImportMode(null)
+        if (fileRef.current) fileRef.current.value = ''
+        return
+      }
+    }
     setImporting(true)
     try {
       const text = await file.text()
       const data = JSON.parse(text)
-      await api.importar(data, modo)
+      await api.importar(data, modo, modo === 'substituir')
       setMsg({ type: 'success', text: `Importação (${modo}) concluída! Recarregue a página.` })
     } catch (e) {
       setMsg({ type: 'error', text: `Erro ao importar: ${e.message}` })

@@ -268,7 +268,10 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
 
   if (produto.tipo === 'carteira') {
     const subCarteiraId = Number(produto.identificador)
-    if (!subCarteiraId) return null
+    if (!subCarteiraId) {
+      console.warn(`[calcularRetornoProduto] produto id=${produto.id} tipo=carteira sem identificador válido`)
+      return null
+    }
     return calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim)
   }
 
@@ -322,10 +325,11 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
     const fp = cotasPrimary[0]
     const lp = cotasPrimary[cotasPrimary.length - 1]
 
-    if (cotasPrimary.length >= 2 && fp?.valor_ajustado && lp?.valor_ajustado) {
+    if (cotasPrimary.length >= 2 && fp?.valor_ajustado && lp?.valor_ajustado && fp.valor > 0 && lp.valor > 0) {
       const ratioFirst = fp.valor_ajustado / fp.valor
       const ratioLast  = lp.valor_ajustado  / lp.valor
-      const ratioDrift = Math.max(ratioFirst, ratioLast) / Math.min(ratioFirst, ratioLast)
+      const minRatio   = Math.min(ratioFirst, ratioLast)
+      const ratioDrift = minRatio > 0 ? Math.max(ratioFirst, ratioLast) / minRatio : Infinity
       if (ratioDrift <= 4) {
         valorInicio = fp.valor_ajustado
         valorFim    = lp.valor_ajustado
@@ -560,7 +564,8 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     for (const r of rows) {
       if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
       // Usa valor_ajustado quando disponível: captura dividendos no dia ex-dividend
-      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado || r.valor)
+      // ?? em vez de || para não descartar valor_ajustado=0 legítimo
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado ?? r.valor)
     }
   }
 
@@ -606,7 +611,9 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
       for (const subId of subCarteirasIds) {
         const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
         if (retMensal != null) {
-          subRetDiario.set(`${subId}_${mes}`, Math.pow(1 + retMensal, 1 / diasDoMes) - 1)
+          const base = 1 + retMensal
+          // base <= 0 ocorre se a sub-carteira perdeu 100%+; Math.pow de negativo dá NaN
+          subRetDiario.set(`${subId}_${mes}`, base > 0 ? Math.pow(base, 1 / diasDoMes) - 1 : 0)
         }
       }
     }
@@ -703,10 +710,10 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     acumulado *= 1 + retDiario
     serie.push({ data: dia, retorno_acumulado: acumulado - 1, cdi_acumulado: acumuladoCDI - 1 })
 
-    // Avança "última cota conhecida"
+    // Avança "última cota conhecida" — ignora preço 0 (dado ruim) para não travar retorno no dia seguinte
     for (const [ident, cotasMap] of cotasMapByIdent) {
       const v = cotasMap.get(dia)
-      if (v !== undefined) ultimaCota.set(ident, v)
+      if (v !== undefined && v > 0) ultimaCota.set(ident, v)
     }
   }
 
@@ -829,10 +836,13 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     }
   }
 
-  // mdd_duracao em dias úteis
-  const mddDuracao = mddInicio && mddFim && serieDiaria
-    ? serieDiaria.findIndex(p => p.data === mddFim) - serieDiaria.findIndex(p => p.data >= mddInicio)
-    : null
+  // mdd_duracao em dias úteis (findIndex retorna -1 se data não constar na série — guards necessários)
+  const mddDuracao = (() => {
+    if (!mddInicio || !mddFim || !serieDiaria) return null
+    const idxFim    = serieDiaria.findIndex(p => p.data === mddFim)
+    const idxInicio = serieDiaria.findIndex(p => p.data >= mddInicio)
+    return idxFim >= 0 && idxInicio >= 0 ? idxFim - idxInicio : null
+  })()
 
   const calmar = maxDD < 0 ? cagrFinal / Math.abs(maxDD) : null
 
@@ -1223,9 +1233,16 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
       if (excess < 1e-10) break
       weights = weights.map(wi => Math.min(wi, maxW))
       const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
-      if (freeTotal < 1e-10) break
+      if (freeTotal < 1e-10) {
+        // Sem capacidade para redistribuir o excesso; fallback para peso igual (sempre ∈ [minW, maxW])
+        weights = Array(n).fill(1 / n)
+        break
+      }
       weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
     }
+    // Garantia: pesos somam exatamente 1 (erros de ponto flutuante no clamping)
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
     portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
@@ -1264,18 +1281,22 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
       if (minViolI.length > 0) {
         const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
         result[worstI] = minW; budget -= minW; fixed.add(worstI)
-        if (budget <= 1e-10) break; continue
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
       }
       const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
       if (maxViolI.length > 0) {
         const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
         result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
-        if (budget <= 1e-10) break; continue
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
       }
       break
     }
 
-    return result
+    // Normalização de segurança: garante soma = 1 após active-set
+    const rpSum = result.reduce((a, b) => a + b, 0)
+    return rpSum > 1e-10 ? result.map(r => r / rpSum) : result
   })()
 
   return {
@@ -1438,9 +1459,15 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       if (excess < 1e-10) break
       weights = weights.map(wi => Math.min(wi, maxW))
       const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
-      if (freeTotal < 1e-10) break
+      if (freeTotal < 1e-10) {
+        weights = Array(n).fill(1 / n)
+        break
+      }
       weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
     }
+    // Garantia: pesos somam exatamente 1 (erros de ponto flutuante no clamping)
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
     portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
@@ -1475,18 +1502,21 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       if (minViolI.length > 0) {
         const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
         result[worstI] = minW; budget -= minW; fixed.add(worstI)
-        if (budget <= 1e-10) break; continue
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
       }
       const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
       if (maxViolI.length > 0) {
         const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
         result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
-        if (budget <= 1e-10) break; continue
+        if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+        continue
       }
       break
     }
 
-    return result
+    const rpSum2 = result.reduce((a, b) => a + b, 0)
+    return rpSum2 > 1e-10 ? result.map(r => r / rpSum2) : result
   })()
 
   return {
@@ -1582,6 +1612,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         if (ret != null) retornoClasse += ret * pesoNorm
 
         // Acumular por ativo — normaliza tickers renomeados para o nome canônico
+        if (!p.identificador) continue  // produto sem identificador não pode ser rastreado individualmente
         const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
         const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
         const ativoKey = `${canonicalId}__${cls}`

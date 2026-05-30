@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS cotas_cache (
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(produto_id, data)
 );
+CREATE INDEX IF NOT EXISTS idx_cotas_produto_id ON cotas_cache(produto_id);
 
 -- Cache de dados macro (CDI, IPCA, benchmarks)
 CREATE TABLE IF NOT EXISTS dados_macro (

@@ -9,7 +9,7 @@ const variants = {
 }
 
 export default function Alert({ type = 'info', title, message, onDismiss }) {
-  const v = variants[type]
+  const v = variants[type] ?? variants.info
   const Icon = v.icon
 
   return (
