@@ -156,11 +156,18 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
   } else if (indexador === 'CDI') {
     const cdiRows = getCDIDiarioLocal(inicio, fim)
     if (cdiRows.length === 0) {
+      // Estima CDI anual pelas taxas mensais disponíveis; evita 12% hardcoded desatualizado
+      const cdiMensais = getCDIMensalLocal(inicio.slice(0, 7), fim.slice(0, 7))
+      const cdiAnualEst = cdiMensais.length > 0
+        ? Math.pow(cdiMensais.reduce((p, r) => p * (1 + r.valor / 100), 1), 12 / cdiMensais.length) - 1
+        : 0.12
       const dias = diasEntre(inicio, fim)
+      const cdiDiarioEst = Math.pow(1 + cdiAnualEst, 1 / 252) - 1
       if (tipo_cdi === 'pct') {
-        retorno = Math.pow(calcularFatorCDI(dias, 0.12 * 100), taxa / 100) - 1
+        retorno = Math.pow(1 + cdiDiarioEst * (taxa / 100), dias) - 1
       } else {
-        retorno = Math.pow(1 + 0.12 + taxa / 100, dias / 252) - 1
+        const spreadDiario = Math.pow(1 + taxa / 100, 1 / 252) - 1
+        retorno = Math.pow((1 + cdiDiarioEst) * (1 + spreadDiario), dias) - 1
       }
     } else {
       let fator = 1
@@ -169,7 +176,8 @@ export function calcularRetornoRFCurva(produto, dataInicio, dataFim) {
         if (tipo_cdi === 'pct') {
           fator *= (1 + cdiDiario * (taxa / 100))
         } else {
-          fator *= (1 + cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1)
+          // Composição geométrica: (1+CDI_dia) × (1+spread_dia) — evita soma aritmética
+          fator *= (1 + cdiDiario) * Math.pow(1 + taxa / 100, 1 / 252)
         }
       }
       retorno = fator - 1
@@ -241,7 +249,7 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
   const totalDias = diasEntre(dataInicio, dataFim) + 1
   if (totalDias <= 0) return null
 
-  let retorno = 0
+  let acum = 1
   let temDados = false
   for (const est of estados) {
     const inicio = est.data_inicio > dataInicio ? est.data_inicio : dataInicio
@@ -252,11 +260,11 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
     const produtos = db.prepare('SELECT * FROM produtos WHERE estado_id = ?').all(est.id)
     if (produtos.length === 0) continue
     const retEst = calcularRetornoEstado({ alocacao: aloc }, produtos, inicio, fim)
-    retorno += retEst * ((diasEntre(inicio, fim) + 1) / totalDias)
+    acum *= (1 + retEst)
     temDados = true
   }
 
-  return temDados ? retorno : null
+  return temDados ? acum - 1 : null
 }
 
 export function calcularRetornoProduto(produto, dataInicio, dataFim) {
@@ -369,13 +377,16 @@ function calcularRetornoEstado(estado, produtos, dataInicio, dataFim) {
     if (pesoClasse === 0) continue
 
     // Retorno da classe = média ponderada pelo peso dos produtos
+    // Dois passos: primeiro coleta retornos, depois renormaliza pelos que têm dados.
+    // Evita diluir a classe quando produto sem cota/vencido é pulado mas seu peso
+    // permanecia no denominador (subestimava silenciosamente o retorno da classe).
+    const retornosProds = prods.map(p => ({ p, ret: calcularRetornoProduto(p, dataInicio, dataFim) }))
+    const pesoComDados = retornosProds.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
     let retornoClasse = 0
-    let pesototal = prods.reduce((s, p) => s + (p.peso || 0), 0)
 
-    for (const p of prods) {
-      const ret = calcularRetornoProduto(p, dataInicio, dataFim)
+    for (const { p, ret } of retornosProds) {
       if (ret == null) continue
-      retornoClasse += ret * ((p.peso || 0) / (pesototal || 1))
+      retornoClasse += ret * ((p.peso || 0) / (pesoComDados || 1))
     }
 
     retornoTotal += retornoClasse * pesoClasse
@@ -650,6 +661,7 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     const aloc = getAloc(mes)
 
     let retDiario = 0
+    const filteredIdents = new Set() // identifiers cujo retorno foi rejeitado pelo filtro do dia
 
     if (estado && aloc) {
       const prods = prodsByEstado.get(estado.id) || []
@@ -693,6 +705,7 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
                 const raw = valorHoje / valorAntes - 1
                 // Ignora retornos diários impossíveis (>40% num dia) — dados corrompidos (ex: ICVM 175 / Yahoo glitch)
                 if (Math.abs(raw) <= 0.40) retP = raw
+                else filteredIdents.add(p.identificador)
               }
             }
           } else if (p.tipo === 'carteira' && p.identificador) {
@@ -710,10 +723,11 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     acumulado *= 1 + retDiario
     serie.push({ data: dia, retorno_acumulado: acumulado - 1, cdi_acumulado: acumuladoCDI - 1 })
 
-    // Avança "última cota conhecida" — ignora preço 0 (dado ruim) para não travar retorno no dia seguinte
+    // Avança "última cota conhecida" — ignora preço 0 e cotas filtradas pelo limiar >40%
+    // (não avança para filtradas: evita cascata onde amanhã o preço correto parece outra anomalia)
     for (const [ident, cotasMap] of cotasMapByIdent) {
       const v = cotasMap.get(dia)
-      if (v !== undefined && v > 0) ultimaCota.set(ident, v)
+      if (v !== undefined && v > 0 && !filteredIdents.has(ident)) ultimaCota.set(ident, v)
     }
   }
 
@@ -794,12 +808,14 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const cdiMedioMensal = retornosMensais.reduce((s, r) => s + (r.cdi || 0), 0) / retornosMensais.length
   const sharpe = volMensal > 0 ? (media - cdiMedioMensal) / volMensal * Math.sqrt(12) : null
 
-  // Sortino
+  // Sortino — downside deviation padrão (Price/Sortino): divide por n_total, não por n_negativos
   const retNeg = retornos.filter((r) => r < cdiMedioMensal)
   const downDev = retNeg.length > 0
-    ? Math.sqrt(retNeg.reduce((s, r) => s + Math.pow(r - cdiMedioMensal, 2), 0) / retNeg.length) * Math.sqrt(12)
+    ? Math.sqrt(retNeg.reduce((s, r) => s + Math.pow(r - cdiMedioMensal, 2), 0) / retornos.length) * Math.sqrt(12)
     : 0
-  const sortino = downDev > 0 ? (cagr - retornoAcumuladoCDI / anos) / downDev : null
+  // Numerador: excesso sobre CDI em base geométrica (evita misturar CAGR geométrico com CDI aritmético)
+  const cagrCDI = Math.pow(acumuladoCDI, 1 / anos) - 1
+  const sortino = downDev > 0 ? (cagr - cagrCDI) / downDev : null
 
   // Série diária: fonte de verdade para retorno_acumulado, CDI, Max Drawdown
   const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
