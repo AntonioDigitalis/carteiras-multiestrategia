@@ -77,19 +77,26 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
     return cdiMensal + (Math.pow(1.04, 1 / 12) - 1)
   }
 
-  // rf_global: AGG + hedge (CDI - IRX/12)
+  // rf_global: AGG + hedge cambial ≈ retorno_local + (CDI - taxa_USD_mensal).
+  // IRX é a taxa anual (% a.a.) do T-Bill 13s; converte p/ mensal geometricamente.
   if (cls === 'rf_global') {
     const agg = db.prepare(`SELECT valor FROM dados_macro WHERE serie='AGG_MENSAL' AND data=?`).get(mesData)
     const irx = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IRX_MENSAL' AND data=?`).get(mesData)
-    if (agg && irx) return agg.valor / 100 + cdiMensal - irx.valor / 100 / 12
+    if (agg && irx) {
+      const irxMensal = Math.pow(1 + irx.valor / 100, 1 / 12) - 1
+      return agg.valor / 100 + cdiMensal - irxMensal
+    }
     return cdiMensal + (Math.pow(1.01, 1 / 12) - 1)
   }
 
-  // rv_global: ACWI + hedge (CDI - IRX/12)
+  // rv_global: ACWI + hedge cambial ≈ retorno_local + (CDI - taxa_USD_mensal).
   if (cls === 'rv_global') {
     const acwi = db.prepare(`SELECT valor FROM dados_macro WHERE serie='ACWI_MENSAL' AND data=?`).get(mesData)
     const irx  = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IRX_MENSAL' AND data=?`).get(mesData)
-    if (acwi && irx) return acwi.valor / 100 + cdiMensal - irx.valor / 100 / 12
+    if (acwi && irx) {
+      const irxMensal = Math.pow(1 + irx.valor / 100, 1 / 12) - 1
+      return acwi.valor / 100 + cdiMensal - irxMensal
+    }
     return cdiMensal + (Math.pow(1.03, 1 / 12) - 1)
   }
 
@@ -1035,6 +1042,7 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   const serie = [{ data: mesInicioStr, passivo_acumulado: 0, ativo_acumulado: 0, alpha: 0 }]
   let acumPassivo = 1
   let acumAtivo = 1
+  let acumPassivoAlinhado = 1 // compõe só meses com retorno ativo disponível (base justa p/ alpha)
   const retornosMensais = []
 
   for (const aloc of alocacoes) {
@@ -1060,13 +1068,17 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
     const retAtivo = retAtivosMap[mes] ?? null
     retornosMensais.push({ mes, passivo: retPassivo, ativo: retAtivo, cdi: cdiMensal })
     acumPassivo *= (1 + retPassivo)
-    if (retAtivo != null) acumAtivo *= (1 + retAtivo)
+    if (retAtivo != null) {
+      acumAtivo *= (1 + retAtivo)
+      acumPassivoAlinhado *= (1 + retPassivo)
+    }
 
     serie.push({
       data: mes,
       passivo_acumulado: acumPassivo - 1,
-      ativo_acumulado: acumAtivo - 1,
-      alpha: acumAtivo / acumPassivo - 1,
+      ativo_acumulado: retAtivo != null ? acumAtivo - 1 : null,
+      // alpha do ponto compara ativo vs passivo na mesma base (só meses com ativo)
+      alpha: retAtivo != null ? acumAtivo / acumPassivoAlinhado - 1 : null,
     })
   }
 
@@ -1079,7 +1091,9 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   const cagrPassivo = anos > 0 ? Math.pow(acumPassivo, 1 / anos) - 1 : 0
 
   const cdiMedioMensal = retornosMensais.reduce((s, r) => s + (r.cdi || 0), 0) / T
-  const sharpePassivo = volPassivo > 0 ? (cagrPassivo - cdiMedioMensal * 12) / volPassivo : null
+  // CDI anualizado geometricamente (consistente com cagrPassivo); antes usava cdiMensal*12 (aritmético)
+  const cagrCDIPassivo = Math.pow(1 + cdiMedioMensal, 12) - 1
+  const sharpePassivo = volPassivo > 0 ? (cagrPassivo - cagrCDIPassivo) / volPassivo : null
 
   // Drawdown passivo
   let picoP = 1, navP = 1, maxDDP = 0
@@ -1091,17 +1105,19 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   }
 
   // Tracking error + information ratio
-  const alphas = retornosMensais.map((r) => (r.ativo ?? 0) - r.passivo)
-  const mediaAlpha = alphas.reduce((a, b) => a + b, 0) / alphas.length
+  // Considera apenas meses com retorno ativo disponível (não trata ausência como 0%)
+  const alphas = retornosMensais.filter((r) => r.ativo != null).map((r) => r.ativo - r.passivo)
+  const mediaAlpha = alphas.length ? alphas.reduce((a, b) => a + b, 0) / alphas.length : 0
   const varAlpha = alphas.reduce((s, a) => s + Math.pow(a - mediaAlpha, 2), 0) / Math.max(alphas.length - 1, 1)
   const trackingError = Math.sqrt(varAlpha) * Math.sqrt(12)
   const informationRatio = trackingError > 0 ? (ativoMetricas.cagr - cagrPassivo) / trackingError : null
 
-  // Rolling 12m alpha
+  // Rolling 12m alpha (apenas janelas com retorno ativo completo nos 12 meses)
   const rolling_alpha = []
   for (let i = 11; i < retornosMensais.length; i++) {
     const janela = retornosMensais.slice(i - 11, i + 1)
-    const acumAtivJan = janela.reduce((p, r) => p * (1 + (r.ativo ?? 0)), 1)
+    if (janela.some((r) => r.ativo == null)) continue
+    const acumAtivJan = janela.reduce((p, r) => p * (1 + r.ativo), 1)
     const acumPassJan = janela.reduce((p, r) => p * (1 + r.passivo), 1)
     rolling_alpha.push({ data: janela[janela.length - 1].mes, alpha_12m: acumAtivJan / acumPassJan - 1 })
   }
@@ -1157,7 +1173,7 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
       sharpe: sharpePassivo,
       max_drawdown: maxDDP,
     },
-    alpha_total: acumAtivo / acumPassivo - 1,
+    alpha_total: acumAtivo / acumPassivoAlinhado - 1,
     tracking_error: trackingError,
     information_ratio: informationRatio,
     benchmarks: BENCHMARKS_PASSIVA,
