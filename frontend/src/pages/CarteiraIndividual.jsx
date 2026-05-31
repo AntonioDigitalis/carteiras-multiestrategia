@@ -596,8 +596,8 @@ function PassivaTab({ carteiraId, period }) {
                 formatter={(v, name) => [`${(v * 100).toFixed(2)}%`, name]}
               />
               <Legend />
-              <Line type="monotone" dataKey="ativo_acumulado" stroke="#3b82f6" strokeWidth={2} dot={false} name="Carteira Ativa" />
-              <Line type="monotone" dataKey="passivo_acumulado" stroke="#64748b" strokeWidth={2} strokeDasharray="4 2" dot={false} name="Carteira Passiva" />
+              <Line type="monotone" dataKey="ativo_acumulado" stroke="#3b82f6" strokeWidth={2} dot={false} name="Carteira Ativa" connectNulls />
+              <Line type="monotone" dataKey="passivo_acumulado" stroke="#64748b" strokeWidth={2} strokeDasharray="4 2" dot={false} name="Carteira Passiva" connectNulls />
             </LineChart>
           </ResponsiveContainer>
         </div>
