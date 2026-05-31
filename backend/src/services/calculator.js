@@ -349,6 +349,18 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
       const minRatio   = Math.min(ratioFirst, ratioLast)
       const ratioDrift = minRatio > 0 ? Math.max(ratioFirst, ratioLast) / minRatio : Infinity
 
+      // Guard: ratio < 0.5 indica recalibração retroativa suspeita (ex: Yahoo interpretou
+      // dados corrompidos como grupamento e ajustou toda a série por /100).
+      // Yield máximo realista para FIIs/ações em 2 anos ≈ 25%, portanto ratio ≥ 0.75.
+      // Cobre splits legítimos: eles têm ratioDrift > 20 e são rejeitados pelo check abaixo.
+      if (minRatio < 0.5) {
+        console.warn(`[calcularRetornoProduto] ${produto.identificador}: valor_ajustado suspeito (ratio=${(minRatio * 100).toFixed(1)}%) — possível recalibração corrompida, usando preço nominal`)
+        valorInicio = first.valor
+        valorFim    = last.valor
+        if (!valorInicio || valorInicio === 0) return null
+        return valorFim / valorInicio - 1
+      }
+
       // Detecta quando todos os preços ajustados são iguais ao nominal ao longo do período inteiro.
       // Isso indica que a fonte não rastreia dividendos (comum em FIIs via Yahoo/Alpha Vantage).
       // Nesse caso, corrige usando dividendos registrados em eventos_corporativos.
