@@ -1330,6 +1330,165 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
   return { carteira: carteira.nome, perfil: carteira.perfil_nome, linhas, labels: LABELS_CLASSE }
 }
 
+// ── Dados diários por produto (para auditoria via Excel) ──────────────────
+
+export function calcularDadosDiariosPorProduto(carteiraId, dataInicio, dataFim) {
+  const db = getDb()
+
+  // Dias úteis do período (via CDI_DIARIO como calendário)
+  const cdiRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicio, dataFim)
+  if (!cdiRows.length) return null
+  const diasUteis = cdiRows.map(r => r.data)
+  const cdiByData = new Map(cdiRows.map(r => [r.data, r.valor / 100]))
+
+  // Estados ativos no período
+  const estados = db.prepare(`
+    SELECT * FROM estados_portfolio
+    WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+    ORDER BY data_inicio
+  `).all(carteiraId, dataFim, dataInicio)
+  if (!estados.length) return null
+
+  // Batch: todos os produtos dos estados do período
+  const estadoIds = estados.map(e => e.id)
+  const phE = estadoIds.map(() => '?').join(',')
+  const todosProds = db.prepare(`SELECT * FROM produtos WHERE estado_id IN (${phE})`).all(...estadoIds)
+
+  const prodsByEstado = new Map()
+  for (const p of todosProds) {
+    if (!prodsByEstado.has(p.estado_id)) prodsByEstado.set(p.estado_id, [])
+    prodsByEstado.get(p.estado_id).push(p)
+  }
+
+  // Catálogo de produtos únicos: fundo/acao → chave=identificador; rf_curva → chave='rf_<id>'
+  const catalogMap = new Map()
+  for (const p of todosProds) {
+    const chave = (p.tipo === 'rf_curva' || !p.identificador) ? `rf_${p.id}` : p.identificador
+    if (!catalogMap.has(chave)) {
+      catalogMap.set(chave, { chave, nome: p.nome, tipo: p.tipo, identificador: p.identificador, classe: p.classe })
+    }
+  }
+
+  // Cotas de mercado (fundo/acao) com buffer de 10 dias para calcular retorno do 1º dia
+  const identifiers = [...new Set(
+    todosProds.filter(p => (p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador).map(p => p.identificador)
+  )]
+  const bufferInicio = new Date(dataInicio + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+
+  const cotasMapByIdent = new Map()
+  if (identifiers.length) {
+    const ph2 = identifiers.map(() => '?').join(',')
+    const rows = db.prepare(`
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
+      FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id
+      WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
+      GROUP BY p.identificador, cc.data ORDER BY p.identificador, cc.data
+    `).all(...identifiers, bufferStr, dataFim)
+    for (const r of rows) {
+      if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado ?? r.valor)
+    }
+  }
+
+  // IPCA mensal para rf_curva indexada a inflação
+  const ipcaRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicio.slice(0, 7) + '-01', dataFim.slice(0, 7) + '-01')
+  const ipcaByMes = new Map(ipcaRows.map(r => [r.data.slice(0, 7), r.valor / 100]))
+
+  // Última cota conhecida antes do período (para retorno do 1º dia)
+  const ultimaCota = new Map()
+  for (const [ident, cotasMap] of cotasMapByIdent) {
+    const antes = [...cotasMap.keys()].filter(d => d < dataInicio).sort()
+    if (antes.length) ultimaCota.set(ident, cotasMap.get(antes[antes.length - 1]))
+  }
+
+  // Estado ativo em um dia
+  function getEstado(dia) {
+    let ativo = null
+    for (const e of estados) {
+      if (e.data_inicio > dia) break
+      if (!e.data_fim || e.data_fim >= dia) ativo = e
+    }
+    return ativo
+  }
+
+  // Saída: chave → { preco: Map(data→number), retorno: Map(data→number) }
+  const dados = new Map()
+  for (const chave of catalogMap.keys()) dados.set(chave, { preco: new Map(), retorno: new Map() })
+
+  // Preço teórico acumulado para rf_curva (base 100 na primeira aparição)
+  const precoTeorico = new Map()
+
+  for (const dia of diasUteis) {
+    const filteredIdents = new Set()
+    const estado = getEstado(dia)
+    const mes = dia.slice(0, 7)
+
+    if (estado) {
+      const prods = prodsByEstado.get(estado.id) || []
+      const cdiDiario = cdiByData.get(dia) ?? 0
+      const ipcaMensal = ipcaByMes.get(mes) ?? 0.005
+
+      for (const p of prods) {
+        const chave = (p.tipo === 'rf_curva' || !p.identificador) ? `rf_${p.id}` : p.identificador
+        const d = dados.get(chave)
+        if (!d) continue
+
+        let retP = null
+        let precoHoje = null
+
+        if (p.tipo === 'rf_curva') {
+          const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = p
+          if ((data_vencimento && dia > data_vencimento) || (data_emissao && dia < data_emissao)) {
+            retP = 0
+          } else if (indexador === 'PRE') {
+            retP = Math.pow(1 + taxa / 100, 1 / 252) - 1
+          } else if (indexador === 'CDI') {
+            retP = tipo_cdi === 'pct'
+              ? cdiDiario * (taxa / 100)
+              : cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1
+          } else if (indexador === 'IPCA') {
+            retP = (Math.pow(1 + ipcaMensal, 1 / 21) - 1) + (Math.pow(1 + taxa / 100, 1 / 252) - 1)
+          }
+          if (retP !== null && isento_ir) retP /= (1 - 0.15)
+          // Preço teórico: base 100 composta diariamente
+          const prev = precoTeorico.get(chave) ?? 100
+          if (retP !== null) { precoHoje = prev * (1 + retP); precoTeorico.set(chave, precoHoje) }
+
+        } else if ((p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador) {
+          const cotasMap = cotasMapByIdent.get(p.identificador)
+          if (cotasMap) {
+            const valorHoje = cotasMap.get(dia)
+            const valorAntes = ultimaCota.get(p.identificador)
+            precoHoje = valorHoje ?? null
+            if (valorHoje && valorAntes && valorAntes > 0) {
+              const raw = valorHoje / valorAntes - 1
+              if (Math.abs(raw) <= 0.40) retP = raw
+              else filteredIdents.add(p.identificador)
+            }
+          }
+        }
+
+        if (precoHoje != null) d.preco.set(dia, precoHoje)
+        if (retP != null) d.retorno.set(dia, retP)
+      }
+    }
+
+    // Avança última cota (mesmo filtro do calcularSerieDiaria)
+    for (const [ident, cotasMap] of cotasMapByIdent) {
+      const v = cotasMap.get(dia)
+      if (v !== undefined && v > 0 && !filteredIdents.has(ident)) ultimaCota.set(ident, v)
+    }
+  }
+
+  return { diasUteis, produtos: [...catalogMap.values()], dados }
+}
+
 // ── Helpers de otimização ─────────────────────────────────
 
 // Projeção no simplex com caixa {Σw=1, lo≤w≤hi} via bissecção no multiplicador τ (Duchi et al. 2008)

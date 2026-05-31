@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getDb } from '../db/database.js'
-import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel, calcularCorrelacao, calcularPainelMercado } from '../services/calculator.js'
+import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel, calcularCorrelacao, calcularPainelMercado, calcularDadosDiariosPorProduto } from '../services/calculator.js'
 import { garantirDadosMacro, fetchHistoricoBrapi } from '../services/external.js'
 
 const router = Router()
@@ -534,6 +534,56 @@ router.get('/:id/exportar-excel', async (req, res) => {
     const ws3 = XLSX.utils.aoa_to_sheet(aba3)
     ws3['!cols'] = [{ wch: 10 }, ...classes.map(() => ({ wch: 22 })), { wch: 18 }]
     XLSX.utils.book_append_sheet(wb, ws3, 'Acumulado por Classe')
+
+    // ── Aba 4: Retorno Diário da Carteira ─────────────────────
+    const metricas = calcularMetricas(Number(req.params.id), start || null, end || null)
+    const serieDiaria = metricas?.serie_retorno_diaria ?? []
+    if (serieDiaria.length > 1) {
+      const aba4 = [
+        ['Data', 'Retorno Diário (%)', 'Retorno Acumulado (%)', 'CDI Acumulado (%)'],
+        ...serieDiaria.map((p, i) => {
+          const retDia = i === 0 ? 0 : pct((1 + p.retorno_acumulado) / (1 + serieDiaria[i - 1].retorno_acumulado) - 1)
+          return [p.data, retDia, pct(p.retorno_acumulado), pct(p.cdi_acumulado)]
+        }),
+      ]
+      const ws4 = XLSX.utils.aoa_to_sheet(aba4)
+      ws4['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 24 }, { wch: 20 }]
+      XLSX.utils.book_append_sheet(wb, ws4, 'Retorno Diário Carteira')
+    }
+
+    // ── Aba 5: Preço e Retorno Diário por Produto (formato largo) ──
+    const efStart = start || '2020-01-01'
+    const efEnd   = end   || new Date().toISOString().split('T')[0]
+    const dadosProd = calcularDadosDiariosPorProduto(Number(req.params.id), efStart, efEnd)
+    if (dadosProd) {
+      const { diasUteis, produtos, dados } = dadosProd
+      // Ordena produtos: ações/fundos por identificador, depois rf_curva por nome
+      const prodsOrdenados = [...produtos].sort((a, b) => {
+        if (a.tipo === 'rf_curva' && b.tipo !== 'rf_curva') return 1
+        if (a.tipo !== 'rf_curva' && b.tipo === 'rf_curva') return -1
+        return (a.identificador ?? a.nome).localeCompare(b.identificador ?? b.nome)
+      })
+      const label = p => p.identificador && p.identificador !== p.nome ? p.identificador : p.nome
+      const headerProd = ['Data', ...prodsOrdenados.flatMap(p => [`${label(p)} Preço`, `${label(p)} Ret%`])]
+      const aba5 = [
+        headerProd,
+        ...diasUteis.map(dia => [
+          dia,
+          ...prodsOrdenados.flatMap(p => {
+            const d = dados.get(p.chave)
+            const preco = d?.preco.get(dia) ?? null
+            const ret   = d?.retorno.get(dia) ?? null
+            return [
+              preco != null ? parseFloat(preco.toFixed(4)) : null,
+              ret   != null ? parseFloat((ret * 100).toFixed(4)) : null,
+            ]
+          }),
+        ]),
+      ]
+      const ws5 = XLSX.utils.aoa_to_sheet(aba5)
+      ws5['!cols'] = [{ wch: 12 }, ...prodsOrdenados.flatMap(() => [{ wch: 14 }, { wch: 12 }])]
+      XLSX.utils.book_append_sheet(wb, ws5, 'Retorno Diário por Produto')
+    }
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
     // Remove chars que quebram headers HTTP (aspas, barras, CR/LF) antes de interpolar no Content-Disposition
