@@ -910,39 +910,81 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const var_99  = sortedRet[varIdx99] != null ? -sortedRet[varIdx99] : null
   const cvar_99 = varIdx99 >= 0 ? -(sortedRet.slice(0, varIdx99 + 1).reduce((s, r) => s + r, 0) / (varIdx99 + 1)) : null
 
-  // ── Beta e Up/Down Capture vs IBOV ─────────────────────
-  const ibovRows = db.prepare(
-    `SELECT data, valor FROM dados_macro WHERE serie='IBOV_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
-  ).all(mesInicioStr + '-01', mesFimStr + '-01')
-  const ibovByMes = new Map(ibovRows.map(r => [r.data.slice(0, 7), r.valor / 100]))
+  // ── Benchmark adaptativo: IBOV para RV Brasil, IFIX para FIIs, Passivo para multi-estratégia ──
+  const BENCHMARK_POR_CLASSE = {
+    rv_brasil:      { serie: 'IBOV_MENSAL',   label: 'IBOV' },
+    fundos_listados:{ serie: 'IFIX_MENSAL',   label: 'IFIX' },
+    rv_global:      { serie: 'ACWI_MENSAL',   label: 'ACWI' },
+    inflacao:       { serie: 'IMAB11_MENSAL', label: 'IMA-B' },
+    prefixado:      { serie: 'IRFM11_MENSAL', label: 'IRF-M' },
+    multimercado:   { serie: 'IHFA_MENSAL',   label: 'IHFA' },
+    pos_fixado:     { serie: 'CDI_MENSAL',    label: 'CDI' },
+  }
+  const CLASSES_BETA = Object.keys(LABELS_CLASSE)
 
-  const paresMesIbov = retornosMensais
-    .map(r => ({ mes: r.mes, cart: r.retorno, ibov: ibovByMes.get(r.mes) }))
-    .filter(p => p.ibov != null)
+  // Peso médio de cada classe no período para identificar classe dominante
+  const pesoMedioClasse = {}
+  for (const cls of CLASSES_BETA)
+    pesoMedioClasse[cls] = alocacoes.reduce((s, a) => s + (a[cls] || 0), 0) / Math.max(alocacoes.length, 1)
+  const classeDOM = CLASSES_BETA.find(cls => pesoMedioClasse[cls] > 50)
 
-  let beta_ibov = null, up_capture = null, down_capture = null
-  const ibovDisponivel = paresMesIbov.length >= 12
+  let benchmarkByMes = new Map()
+  let benchmark_label = 'Passivo'
 
-  if (ibovDisponivel) {
-    const cartArr  = paresMesIbov.map(p => p.cart)
-    const ibovArr  = paresMesIbov.map(p => p.ibov)
-    const mCart    = cartArr.reduce((s, r) => s + r, 0) / cartArr.length
-    const mIbov    = ibovArr.reduce((s, r) => s + r, 0) / ibovArr.length
-    const covCI    = cartArr.reduce((s, r, i) => s + (r - mCart) * (ibovArr[i] - mIbov), 0) / (cartArr.length - 1)
-    const varIbov  = ibovArr.reduce((s, r) => s + Math.pow(r - mIbov, 2), 0) / (ibovArr.length - 1)
-    beta_ibov = varIbov > 0 ? covCI / varIbov : null
+  if (classeDOM && BENCHMARK_POR_CLASSE[classeDOM]) {
+    // Carteira concentrada: usa o índice da classe dominante
+    const { serie, label } = BENCHMARK_POR_CLASSE[classeDOM]
+    benchmark_label = label
+    const bmkRows = db.prepare(
+      `SELECT data, valor FROM dados_macro WHERE serie=? AND data >= ? AND data <= ? ORDER BY data`
+    ).all(serie, mesInicioStr + '-01', mesFimStr + '-01')
+    benchmarkByMes = new Map(bmkRows.map(r => [r.data.slice(0, 7), r.valor / 100]))
+  } else {
+    // Multi-estratégia: benchmark passivo composto (retorno ponderado dos índices por classe)
+    for (const aloc of alocacoes) {
+      const mes = aloc.mes
+      const cdiRow  = db.prepare(`SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?`).get(mes + '-01')
+      const ipcaRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data=?`).get(mes + '-01')
+      const cdiM  = cdiRow  ? cdiRow.valor  / 100 : 0.01
+      const ipcaM = ipcaRow ? ipcaRow.valor / 100 : 0.004
+      let retBmk = 0
+      for (const cls of CLASSES_BETA) {
+        const peso = (aloc[cls] || 0) / 100
+        if (peso === 0) continue
+        retBmk += retornoPassivoClasse(cls, mes, cdiM, ipcaM, db) * peso
+      }
+      benchmarkByMes.set(mes, retBmk)
+    }
+  }
 
-    const upMeses   = paresMesIbov.filter(p => p.ibov > 0)
-    const downMeses = paresMesIbov.filter(p => p.ibov < 0)
+  // Beta e Up/Down Capture vs benchmark escolhido
+  const paresBmk = retornosMensais
+    .map(r => ({ mes: r.mes, cart: r.retorno, bmk: benchmarkByMes.get(r.mes) }))
+    .filter(p => p.bmk != null)
+
+  let beta = null, up_capture = null, down_capture = null
+  const benchmark_disponivel = paresBmk.length >= 12
+
+  if (benchmark_disponivel) {
+    const cartArr = paresBmk.map(p => p.cart)
+    const bmkArr  = paresBmk.map(p => p.bmk)
+    const mCart   = cartArr.reduce((s, r) => s + r, 0) / cartArr.length
+    const mBmk    = bmkArr.reduce((s, r) => s + r, 0) / bmkArr.length
+    const covCB   = cartArr.reduce((s, r, i) => s + (r - mCart) * (bmkArr[i] - mBmk), 0) / (cartArr.length - 1)
+    const varBmk  = bmkArr.reduce((s, r) => s + Math.pow(r - mBmk, 2), 0) / (bmkArr.length - 1)
+    beta = varBmk > 0 ? covCB / varBmk : null
+
+    const upMeses   = paresBmk.filter(p => p.bmk > 0)
+    const downMeses = paresBmk.filter(p => p.bmk < 0)
     if (upMeses.length >= 6) {
-      const acumCartUp  = upMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
-      const acumIbovUp  = upMeses.reduce((p, r) => p * (1 + r.ibov), 1) - 1
-      up_capture = acumIbovUp !== 0 ? acumCartUp / acumIbovUp : null
+      const acumCartUp = upMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
+      const acumBmkUp  = upMeses.reduce((p, r) => p * (1 + r.bmk), 1) - 1
+      up_capture = acumBmkUp !== 0 ? acumCartUp / acumBmkUp : null
     }
     if (downMeses.length >= 3) {
-      const acumCartDn  = downMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
-      const acumIbovDn  = downMeses.reduce((p, r) => p * (1 + r.ibov), 1) - 1
-      down_capture = acumIbovDn !== 0 ? acumCartDn / acumIbovDn : null
+      const acumCartDn = downMeses.reduce((p, r) => p * (1 + r.cart), 1) - 1
+      const acumBmkDn  = downMeses.reduce((p, r) => p * (1 + r.bmk), 1) - 1
+      down_capture = acumBmkDn !== 0 ? acumCartDn / acumBmkDn : null
     }
   }
 
@@ -980,8 +1022,8 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     n_meses: retornosMensais.length,
     // Risco
     var_95, cvar_95, var_99, cvar_99,
-    // vs IBOV
-    beta_ibov, up_capture, down_capture, ibov_disponivel: ibovDisponivel,
+    // vs benchmark adaptativo
+    beta, up_capture, down_capture, benchmark_disponivel, benchmark_label,
     // Janelas fixas
     retorno_mtd, retorno_ytd, retorno_12m, retorno_24m,
   }

@@ -355,16 +355,16 @@ function RiscoTab({ metricas }) {
 
       <div className="space-y-4">
         <div className="card space-y-0.5">
-          <div className="text-sm font-medium text-slate-300 mb-3">vs. IBOV</div>
-          {!m.ibov_disponivel && (
-            <p className="text-xs text-slate-500">Dados insuficientes de IBOV no período (&lt; 12 meses de overlap).</p>
+          <div className="text-sm font-medium text-slate-300 mb-3">vs. {m.benchmark_label ?? 'Benchmark'}</div>
+          {!m.benchmark_disponivel && (
+            <p className="text-xs text-slate-500">Dados insuficientes de {m.benchmark_label ?? 'benchmark'} no período (&lt; 12 meses de overlap).</p>
           )}
-          <MetricRow label="Beta" value={m.beta_ibov?.toFixed(2) ?? '—'}
-            tooltip="Sensibilidade da carteira ao IBOV. Beta=1 move igual ao índice; <1 menos sensível; >1 amplifica os movimentos." />
+          <MetricRow label="Beta" value={m.beta?.toFixed(2) ?? '—'}
+            tooltip={`Sensibilidade da carteira ao ${m.benchmark_label ?? 'benchmark'}. Beta=1 move igual ao índice; <1 menos sensível; >1 amplifica os movimentos.`} />
           <MetricRow label="Up Capture" value={m.up_capture != null ? `${(m.up_capture * 100).toFixed(0)}%` : '—'}
-            tooltip="Quanto a carteira capturou dos meses de alta do IBOV. Acima de 100% = superou o índice nas altas." />
+            tooltip={`Quanto a carteira capturou dos meses de alta do ${m.benchmark_label ?? 'benchmark'}. Acima de 100% = superou o índice nas altas.`} />
           <MetricRow label="Down Capture" value={m.down_capture != null ? `${(m.down_capture * 100).toFixed(0)}%` : '—'}
-            tooltip="Quanto a carteira capturou das quedas do IBOV. Abaixo de 100% = perdeu menos que o índice nas baixas." />
+            tooltip={`Quanto a carteira capturou das quedas do ${m.benchmark_label ?? 'benchmark'}. Abaixo de 100% = perdeu menos que o índice nas baixas.`} />
         </div>
 
         <div className="card space-y-0.5">
