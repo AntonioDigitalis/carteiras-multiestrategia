@@ -881,10 +881,10 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const n = sortedRet.length
   const varIdx95 = Math.max(0, Math.floor(0.05 * n) - 1)
   const varIdx99 = Math.max(0, Math.floor(0.01 * n) - 1)
-  const var95  = sortedRet[varIdx95] ?? null
-  const cvar95 = varIdx95 >= 0 ? sortedRet.slice(0, varIdx95 + 1).reduce((s, r) => s + r, 0) / (varIdx95 + 1) : null
-  const var99  = sortedRet[varIdx99] ?? null
-  const cvar99 = varIdx99 >= 0 ? sortedRet.slice(0, varIdx99 + 1).reduce((s, r) => s + r, 0) / (varIdx99 + 1) : null
+  const var_95  = sortedRet[varIdx95] != null ? -sortedRet[varIdx95] : null
+  const cvar_95 = varIdx95 >= 0 ? -(sortedRet.slice(0, varIdx95 + 1).reduce((s, r) => s + r, 0) / (varIdx95 + 1)) : null
+  const var_99  = sortedRet[varIdx99] != null ? -sortedRet[varIdx99] : null
+  const cvar_99 = varIdx99 >= 0 ? -(sortedRet.slice(0, varIdx99 + 1).reduce((s, r) => s + r, 0) / (varIdx99 + 1)) : null
 
   // ── Beta e Up/Down Capture vs IBOV ─────────────────────
   const ibovRows = db.prepare(
