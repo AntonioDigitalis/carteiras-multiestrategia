@@ -275,7 +275,7 @@ async function fetchHistoricoAlphaVantage(ticker, dataInicio, dataFim, apiKey) {
     .map(([d, v]) => ({
       date: d,
       close: parseFloat(v['4. close']),
-      adjustedClose: parseFloat(v['4. close']), // free tier não tem adjusted
+      adjustedClose: null, // free tier não tem adjusted — null evita corromper valor_ajustado correto de outras fontes
     }))
     .sort((a, b) => a.date.localeCompare(b.date))
 }
@@ -457,13 +457,15 @@ async function fetchCotahistAnual(year) {
   fs.rmSync(tmpZip, { force: true })
   fs.rmSync(tmpTxt, { force: true })
 
-  // Parse: tipo='01' (cotação diária), BDI='02' (lote padrão)
+  // Parse: tipo='01' (cotação diária)
+  // BDI pos 10-11: '02'=lote padrão (ações), '12'=FII, '14'=CRI/CRA/debêntures listadas
   // pos 0-1: tipo, 2-9: data YYYYMMDD, 10-11: BDI, 12-23: ticker (12 chars), 108-120: preço fechamento
+  const BDI_VALIDOS = new Set(['02', '12', '14'])
   const byTicker = new Map()
   for (const line of content.split('\n')) {
     if (line.length < 121) continue
     if (line[0] !== '0' || line[1] !== '1') continue
-    if (line[10] !== '0' || line[11] !== '2') continue
+    if (!BDI_VALIDOS.has(line.slice(10, 12))) continue
     const tkr  = line.slice(12, 24).trimEnd()
     const ds   = line.slice(2, 10)
     const dt   = `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`
@@ -514,6 +516,8 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
         adjustedClose: q.adjclose ?? q.close,
       }))
       .filter((r) => r.close != null && r.date >= dataInicio && r.date <= dataFim)
+    // Persiste eventos de splits e dividendos (usados como fallback quando adj não está disponível)
+    if (result.events) _persistirEventosYahoo(ticker, result.events)
   } catch (e) {
     registrarLog('yahoo', ticker, null, 'aviso', e.message)
 
@@ -550,10 +554,15 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
   }
 
   const stmt = db.prepare(
+    // COALESCE: preserva valor_ajustado existente quando a nova fonte não tem ajuste (null).
+    // Evita que B3/COTAHIST/Alpha Vantage sobrescrevam o valor_ajustado correto do Yahoo.
+    // Yahoo sempre fornece valor_ajustado não-null → sobrescreve normalmente.
     `INSERT INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(produto_id, data) DO UPDATE SET
-       valor = excluded.valor, valor_ajustado = excluded.valor_ajustado, fonte = excluded.fonte`
+       valor = excluded.valor,
+       valor_ajustado = COALESCE(excluded.valor_ajustado, cotas_cache.valor_ajustado),
+       fonte = excluded.fonte`
   )
   const insertMany = db.transaction((produtoId, r) => {
     for (const row of r) stmt.run(produtoId, row.date, row.close, row.adjustedClose, fonte)

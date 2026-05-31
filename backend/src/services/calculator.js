@@ -348,6 +348,30 @@ export function calcularRetornoProduto(produto, dataInicio, dataFim) {
       const ratioLast  = lp.valor_ajustado  / lp.valor
       const minRatio   = Math.min(ratioFirst, ratioLast)
       const ratioDrift = minRatio > 0 ? Math.max(ratioFirst, ratioLast) / minRatio : Infinity
+
+      // Detecta quando todos os preços ajustados são iguais ao nominal ao longo do período inteiro.
+      // Isso indica que a fonte não rastreia dividendos (comum em FIIs via Yahoo/Alpha Vantage).
+      // Nesse caso, corrige usando dividendos registrados em eventos_corporativos.
+      const nSemAjuste = cotasPrimary.filter(r => r.valor_ajustado != null && Math.abs(r.valor_ajustado - r.valor) < 0.001).length
+      const propSemAjuste = nSemAjuste / cotasPrimary.length
+      if (propSemAjuste > 0.95 && cotasPrimary.length >= 20 && produto.classe === 'fundos_listados') {
+        // Fonte não fornece preços ajustados — usa retorno nominal + dividendos de eventos_corporativos
+        const dividendos = db.prepare(
+          `SELECT data, valor FROM eventos_corporativos
+           WHERE ticker = ? AND tipo = 'dividendo' AND data >= ? AND data <= ?
+           ORDER BY data`
+        ).all(produto.identificador, dataInicio, dataFim)
+        if (dividendos.length > 0) {
+          const totalDiv = dividendos.reduce((s, d) => s + d.valor, 0)
+          const retNominal = first.valor > 0 ? last.valor / first.valor - 1 : null
+          if (retNominal != null) {
+            // Retorno total ≈ retorno nominal + yield dos dividendos (divididos pelo preço inicial)
+            return retNominal + totalDiv / first.valor
+          }
+        }
+        console.warn(`[calcularRetornoProduto] ${produto.identificador}: fonte sem preços ajustados para FII listado; retorno é apenas ganho de capital (sem rendimentos)`)
+      }
+
       if (ratioDrift <= 20) {
         // threshold 20 cobre splits/grupamentos de até ~10:1 (ex: grupamento 1:10 → drift=10)
         valorInicio = fp.valor_ajustado
