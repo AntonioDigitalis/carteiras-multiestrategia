@@ -428,37 +428,33 @@ router.post('/:id/otimizar-classe', async (req, res) => {
 
     const db = getDb()
     const hoje = new Date().toISOString().split('T')[0]
-    const cincoAnosAtras = new Date(Date.now() - 5 * 365 * 24 * 3600000).toISOString().split('T')[0]
-    const dataInicio = start || cincoAnosAtras
+    // O otimizador usa no máximo 24 meses — sincronizar 5 anos seria desperdiçar tempo
+    const doisAnosAtras = new Date(Date.now() - 2 * 365 * 24 * 3600000).toISOString().split('T')[0]
+    const dataInicio = start || doisAnosAtras
 
-    // Sincroniza cotas de ativos de tipo 'acao' que ainda não têm dados na base
-    for (const ativo of ativos.filter((a) => a.tipo === 'acao' && a.identificador)) {
-      const temDados = db.prepare(
-        `SELECT COUNT(*) as n FROM cotas_cache cc
-         JOIN produtos p ON cc.produto_id = p.id
-         WHERE p.identificador = ?`
-      ).get(ativo.identificador).n
+    const estadoRef = db.prepare(
+      `SELECT id FROM estados_portfolio WHERE carteira_id = ? ORDER BY mes DESC, data_inicio DESC LIMIT 1`
+    ).get(Number(req.params.id))
 
-      if (temDados === 0 && !_syncInProgress.has(ativo.identificador)) {
+    // Sincroniza ativos sem dados em paralelo, com timeout de 25s por ativo
+    const ativosSemDados = ativos.filter((a) => a.tipo === 'acao' && a.identificador && !_syncInProgress.has(a.identificador)).filter((a) => {
+      const { n } = db.prepare(
+        `SELECT COUNT(*) as n FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id WHERE p.identificador = ?`
+      ).get(a.identificador)
+      return n === 0
+    })
+
+    if (ativosSemDados.length > 0 && estadoRef) {
+      await Promise.allSettled(ativosSemDados.map(async (ativo) => {
         _syncInProgress.add(ativo.identificador)
         let produtoId = null
         try {
-          // Cria produto temporário ligado ao estado mais recente desta carteira
-          const estadoRef = db.prepare(
-            `SELECT id FROM estados_portfolio WHERE carteira_id = ? ORDER BY mes DESC, data_inicio DESC LIMIT 1`
-          ).get(Number(req.params.id))
-          if (!estadoRef) {
-            console.warn(`[otimizar-classe] carteira ${req.params.id} sem estados — sync de ${ativo.identificador} ignorado`)
-            _syncInProgress.delete(ativo.identificador)
-            continue
-          }
-
           produtoId = db.prepare(
-            `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso)
-             VALUES (?, ?, ?, ?, ?, 0)`
+            `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso) VALUES (?, ?, ?, ?, ?, 0)`
           ).run(estadoRef.id, ativo.nome || ativo.identificador, ativo.identificador, ativo.tipo, classe).lastInsertRowid
 
-          const { rows, insertMany } = await fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje)
+          const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 25s')), 25000))
+          const { rows, insertMany } = await Promise.race([fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje), timeout])
           insertMany(produtoId, rows)
         } catch (e) {
           if (produtoId) db.prepare('DELETE FROM produtos WHERE id = ?').run(produtoId)
@@ -466,7 +462,7 @@ router.post('/:id/otimizar-classe', async (req, res) => {
         } finally {
           _syncInProgress.delete(ativo.identificador)
         }
-      }
+      }))
     }
 
     const data = otimizarDentroClasse(
