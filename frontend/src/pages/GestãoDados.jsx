@@ -141,6 +141,11 @@ export default function GestãoDados() {
             <FormularioMes
               carteiraId={carteiraId}
               mes={mesSelecionado}
+              mesAnterior={(() => {
+                const todos = [...new Set([...mesesComAlocacao, ...mesesComProdutos])].sort()
+                const anteriores = todos.filter((m) => m < mesSelecionado)
+                return anteriores[anteriores.length - 1] || null
+              })()}
               onSave={() => {
                 api.getAlocacoes(carteiraId)
                   .then((data) => setMesesComAlocacao(data.map((a) => a.mes)))
@@ -161,13 +166,30 @@ export default function GestãoDados() {
   )
 }
 
-function FormularioMes({ carteiraId, mes, onSave }) {
+function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
   const [alocacao, setAlocacao] = useState(null)
   const [estados, setEstados] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   const [error, setError] = useState(null)
   const [tabEstado, setTabEstado] = useState(0)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  async function duplicarDoMes() {
+    if (!mesAnterior) return
+    setDuplicating(true)
+    setError(null)
+    try {
+      await api.duplicarMes(carteiraId, mesAnterior, mes)
+      onSave()
+      setReloadKey((k) => k + 1)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDuplicating(false)
+    }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -197,7 +219,7 @@ function FormularioMes({ carteiraId, mes, onSave }) {
       })
       .catch(setError)
       .finally(() => setLoading(false))
-  }, [carteiraId, mes])
+  }, [carteiraId, mes, reloadKey])
 
   function totalAlocacao() {
     if (!alocacao) return 0
@@ -222,9 +244,35 @@ function FormularioMes({ carteiraId, mes, onSave }) {
 
   const total = totalAlocacao()
   const totalOk = Math.abs(total - 100) < 0.01
+  const estaVazio = !alocacao?.id && estados.every((e) => !e.id)
 
   return (
     <div className="space-y-4">
+      {/* Duplicar mês anterior */}
+      {estaVazio && mesAnterior && (
+        <div className="card flex items-center justify-between gap-4 py-3">
+          <div className="text-xs text-slate-400">
+            Mês sem dados. Deseja copiar a alocação de{' '}
+            <span className="text-slate-200 font-medium capitalize">
+              {format(new Date(mesAnterior + '-15'), 'MMMM yyyy', { locale: ptBR })}
+            </span>
+            ?
+          </div>
+          <button
+            onClick={duplicarDoMes}
+            disabled={duplicating}
+            className="btn-secondary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5"
+          >
+            {duplicating ? (
+              <span className="w-3 h-3 border-2 border-slate-400/30 border-t-slate-400 rounded-full animate-spin" />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            )}
+            {duplicating ? 'Copiando...' : 'Copiar mês anterior'}
+          </button>
+        </div>
+      )}
+
       {/* Alocação Macro */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">

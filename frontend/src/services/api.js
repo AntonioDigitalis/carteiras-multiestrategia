@@ -39,6 +39,8 @@ export const api = {
   getMesesComEstados: (carteiraId) => request(`/carteiras/${carteiraId}/meses-com-estados`),
   upsertAlocacao: (carteiraId, data) =>
     request(`/carteiras/${carteiraId}/alocacoes`, { method: 'POST', body: data }),
+  duplicarMes: (carteiraId, mesOrigem, mesDestino) =>
+    request(`/carteiras/${carteiraId}/duplicar-mes`, { method: 'POST', body: { mes_origem: mesOrigem, mes_destino: mesDestino } }),
 
   // Estados do portfólio (produtos por mês)
   getEstados: (carteiraId, mes) =>
@@ -115,6 +117,10 @@ export const api = {
   // Otimizador
   otimizar: (carteiraId, params = {}) =>
     request(`/carteiras/${carteiraId}/otimizar`, { method: 'POST', body: params }),
+  otimizarMacroLivre: (params = {}) =>
+    request('/otimizador/macro', { method: 'POST', body: params }),
+  otimizarAtivosLivre: (body) =>
+    request('/otimizador/ativos', { method: 'POST', body }),
   exportarExcel: async (carteiraId, params = {}) => {
     const qs = new URLSearchParams(params).toString()
     const r = await fetch(`/api/carteiras/${carteiraId}/exportar-excel?${qs}`)

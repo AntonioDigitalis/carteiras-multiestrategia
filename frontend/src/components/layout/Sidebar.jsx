@@ -8,12 +8,14 @@ import {
   TrendingUp,
   ChevronRight,
   Briefcase,
+  Sliders,
 } from 'lucide-react'
 import { useCarteiras } from '../../hooks/useCarteiras'
 import { clsx } from 'clsx'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard Geral' },
+  { to: '/otimizador', icon: Sliders, label: 'Otimizador' },
   { to: '/gestao', icon: Database, label: 'Gestão de Dados' },
   { to: '/auditoria', icon: Shield, label: 'Auditoria' },
   { to: '/comparador', icon: GitCompare, label: 'Comparador' },

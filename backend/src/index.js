@@ -9,6 +9,7 @@ import cotasRouter from './routes/cotas.js'
 import auditoriaRouter from './routes/auditoria.js'
 import externalRouter from './routes/external.js'
 import configRouter from './routes/config.js'
+import otimizadorRouter from './routes/otimizador.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -29,6 +30,7 @@ app.use('/api/cotas', cotasRouter)
 app.use('/api/auditoria', auditoriaRouter)
 app.use('/api/external', externalRouter)
 app.use('/api/config', configRouter)
+app.use('/api/otimizador', otimizadorRouter)
 
 // Health check
 app.get('/api/health', (req, res) => {

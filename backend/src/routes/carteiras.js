@@ -279,6 +279,110 @@ router.get('/:id/estados', (req, res) => {
   res.json(result)
 })
 
+// POST /api/carteiras/:id/duplicar-mes
+router.post('/:id/duplicar-mes', (req, res) => {
+  const db = getDb()
+  const { mes_origem, mes_destino } = req.body
+  if (!/^\d{4}-\d{2}$/.test(mes_origem) || !/^\d{4}-\d{2}$/.test(mes_destino)) {
+    return res.status(400).json({ error: 'mes_origem e mes_destino devem ser YYYY-MM' })
+  }
+  if (mes_origem === mes_destino) {
+    return res.status(400).json({ error: 'mes_origem e mes_destino não podem ser iguais' })
+  }
+
+  const carteira = db.prepare('SELECT perfil_id FROM carteiras WHERE id = ?').get(req.params.id)
+  if (!carteira) return res.status(404).json({ error: 'Carteira não encontrada' })
+
+  const alocOrigem = db.prepare('SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes = ?')
+    .get(carteira.perfil_id, mes_origem)
+  const estadosOrigem = db.prepare(
+    'SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio'
+  ).all(req.params.id, mes_origem)
+
+  if (!alocOrigem && estadosOrigem.length === 0) {
+    return res.status(404).json({ error: `Nenhum dado encontrado em ${mes_origem}` })
+  }
+
+  const [oy, om] = mes_origem.split('-').map(Number)
+  const [dy, dm] = mes_destino.split('-').map(Number)
+  const offsetMonths = (dy - oy) * 12 + (dm - om)
+
+  function shiftDate(dateStr) {
+    if (!dateStr) return null
+    const [y, m, d] = dateStr.split('-').map(Number)
+    let nm = m + offsetMonths, ny = y
+    while (nm > 12) { nm -= 12; ny++ }
+    while (nm < 1)  { nm += 12; ny-- }
+    const lastDay = new Date(ny, nm, 0).getDate()
+    const nd = Math.min(d, lastDay)
+    return `${ny}-${String(nm).padStart(2, '0')}-${String(nd).padStart(2, '0')}`
+  }
+
+  try {
+    db.transaction(() => {
+      if (alocOrigem) {
+        db.prepare(`
+          INSERT INTO alocacoes_macro
+            (perfil_id, mes, pos_fixado, inflacao, prefixado, rf_global, multimercado, rv_brasil, rv_global, fundos_listados, alternativos)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(perfil_id, mes) DO UPDATE SET
+            pos_fixado = excluded.pos_fixado, inflacao = excluded.inflacao,
+            prefixado = excluded.prefixado, rf_global = excluded.rf_global,
+            multimercado = excluded.multimercado, rv_brasil = excluded.rv_brasil,
+            rv_global = excluded.rv_global, fundos_listados = excluded.fundos_listados,
+            alternativos = excluded.alternativos, updated_at = datetime('now')
+        `).run(
+          carteira.perfil_id, mes_destino,
+          alocOrigem.pos_fixado, alocOrigem.inflacao, alocOrigem.prefixado, alocOrigem.rf_global,
+          alocOrigem.multimercado, alocOrigem.rv_brasil, alocOrigem.rv_global,
+          alocOrigem.fundos_listados, alocOrigem.alternativos
+        )
+      }
+
+      // Remove estados existentes no destino antes de duplicar
+      const estadosExist = db.prepare(
+        'SELECT id FROM estados_portfolio WHERE carteira_id = ? AND mes = ?'
+      ).all(req.params.id, mes_destino)
+      for (const e of estadosExist) {
+        db.prepare('DELETE FROM produtos WHERE estado_id = ?').run(e.id)
+        db.prepare('DELETE FROM estados_portfolio WHERE id = ?').run(e.id)
+      }
+
+      const stmtEstado = db.prepare(
+        `INSERT INTO estados_portfolio (carteira_id, mes, data_inicio, data_fim, notas)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      const stmtProd = db.prepare(
+        `INSERT INTO produtos
+           (estado_id, tipo, classe, nome, identificador, peso,
+            indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir, duration_manual)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+
+      for (const estado of estadosOrigem) {
+        const { lastInsertRowid: novoId } = stmtEstado.run(
+          req.params.id, mes_destino,
+          shiftDate(estado.data_inicio), shiftDate(estado.data_fim),
+          estado.notas || null
+        )
+        const produtos = db.prepare('SELECT * FROM produtos WHERE estado_id = ?').all(estado.id)
+        for (const p of produtos) {
+          stmtProd.run(
+            novoId, p.tipo, p.classe, p.nome, p.identificador, p.peso,
+            p.indexador, p.tipo_cdi, p.taxa, p.data_emissao, p.data_vencimento,
+            p.isento_ir, p.duration_manual
+          )
+        }
+      }
+    })()
+
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[duplicar-mes]', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // POST /api/carteiras/:id/estados
 router.post('/:id/estados', (req, res) => {
   const db = getDb()
@@ -465,9 +569,14 @@ router.post('/:id/otimizar-classe', async (req, res) => {
       }))
     }
 
+    const restricoes = {}
+    if (req.body.target_duration != null) restricoes.target_duration = Number(req.body.target_duration)
+    if (req.body.duration_tolerancia != null) restricoes.duration_tolerancia = Number(req.body.duration_tolerancia)
+    if (req.body.max_portfolio_min != null) restricoes.max_portfolio_min = Number(req.body.max_portfolio_min)
+
     const data = otimizarDentroClasse(
       Number(req.params.id), classe, ativos,
-      start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100
+      start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100, restricoes
     )
     res.json(data)
   } catch (e) {

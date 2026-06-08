@@ -1778,7 +1778,7 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   })()
 
   return {
-    fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
+    fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe, weights: toWeightMap(p) })),
     max_sharpe: { weights: toWeightMap(maxSharpe), vol: maxSharpe.vol, cagr: maxSharpe.cagr, sharpe: maxSharpe.sharpe },
     min_vol: { weights: toWeightMap(minVol), vol: minVol.vol, cagr: minVol.cagr, sharpe: minVol.sharpe },
     paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
@@ -1792,7 +1792,88 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
 
 // ── Otimizador por Ativo (Monte Carlo hierárquico) ─────────
 
-export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
+// ── ERC (Equal Risk Contribution) ──────────────────────────
+
+function calcERC(n, cov, minW, maxW) {
+  const result = Array(n).fill(0)
+  const fixed = new Set()
+  let budget = 1
+  while (true) {
+    const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
+    const m = freeIdx.length
+    if (m === 0) break
+    if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
+    const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
+    const fixedContrib = freeIdx.map(i => [...fixed].reduce((s, k) => s + cov[i][k] * result[k], 0))
+    let subW = Array(m).fill(1 / m)
+    for (let iter = 0; iter < 1000; iter++) {
+      const mrc = subW.map((_, ii) => budget * subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0) + fixedContrib[ii])
+      const totalVar = subW.reduce((s, wi, ii) => s + wi * budget * mrc[ii], 0)
+      if (totalVar <= 0) break
+      const newSubW = subW.map((wi, ii) => mrc[ii] > 0 && wi > 0 ? wi * Math.sqrt(totalVar / (m * budget * wi * mrc[ii])) : wi)
+      let maxChange = 0
+      for (let ii = 0; ii < m; ii++) maxChange = Math.max(maxChange, Math.abs(newSubW[ii] - subW[ii]))
+      subW = newSubW
+      if (maxChange < 1e-12) break
+    }
+    const sLoop = subW.reduce((a, b) => a + b, 0)
+    if (sLoop > 1e-10) subW = subW.map(v => v / sLoop)
+    freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
+    const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
+    if (minViolI.length > 0) {
+      const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
+      result[worstI] = minW; budget -= minW; fixed.add(worstI)
+      if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+      continue
+    }
+    const maxViolI = freeIdx.filter(i => result[i] > maxW + 1e-10)
+    if (maxViolI.length > 0) {
+      const worstI = maxViolI.reduce((a, b) => result[a] > result[b] ? a : b)
+      result[worstI] = maxW; budget -= maxW; fixed.add(worstI)
+      if (budget <= 1e-10) { freeIdx.forEach(i => { if (i !== worstI) result[i] = 0 }); break }
+      continue
+    }
+    break
+  }
+  const rpSum = result.reduce((a, b) => a + b, 0)
+  return rpSum > 1e-10 ? result.map(r => r / rpSum) : Array(n).fill(1 / n)
+}
+
+// ── Helpers de restrições de portfólio ─────────────────────
+
+function calcDurationCarteira(weights, ativosValidos) {
+  const com = ativosValidos
+    .map((a, i) => ({ w: weights[i], d: Number(a.duration) }))
+    .filter((x) => x.d > 0 && isFinite(x.d))
+  const totalW = com.reduce((s, x) => s + x.w, 0)
+  return totalW > 0 ? com.reduce((s, x) => s + x.w * x.d, 0) / totalW : null
+}
+
+function calcMinPortfolio(weights, ativosValidos) {
+  const vals = ativosValidos
+    .map((a, i) => (a.min_lote > 0 ? a.min_lote / Math.max(weights[i], 1e-10) : null))
+    .filter((x) => x != null)
+  return vals.length > 0 ? Math.max(...vals) : null
+}
+
+function satisfazRestricoes(weights, ativosValidos, restricoes) {
+  const { target_duration, duration_tolerancia = 1, max_portfolio_min } = restricoes
+  if (target_duration != null) {
+    const dur = calcDurationCarteira(weights, ativosValidos)
+    if (dur != null && Math.abs(dur - target_duration) > duration_tolerancia) return false
+  }
+  if (max_portfolio_min != null) {
+    const minP = calcMinPortfolio(weights, ativosValidos)
+    if (minP != null && minP > max_portfolio_min) return false
+  }
+  return true
+}
+
+function aplicarFiltros(portfolios, ativosValidos, restricoes) {
+  return portfolios.filter((p) => satisfazRestricoes(p.weights, ativosValidos, restricoes))
+}
+
+export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1, restricoes = {}) {
   const db = getDb()
 
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
@@ -1949,6 +2030,182 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     portfolios.push({ weights, ...portfolioStats(weights) })
   }
 
+  const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
+
+  const pesosRP = calcERC(n, cov, minW, maxW)
+
+  // Aplica restrições de duration e valor mínimo sobre o conjunto Monte Carlo
+  const restricoesAtivas = (restricoes.target_duration != null) || (restricoes.max_portfolio_min != null)
+  const portfoliosFiltrados = restricoesAtivas
+    ? aplicarFiltros(portfolios, ativosValidos, restricoes)
+    : portfolios
+
+  if (restricoesAtivas && portfoliosFiltrados.length < 10) {
+    return {
+      error: `Apenas ${portfoliosFiltrados.length} de ${portfolios.length} simulações atendem às restrições. Amplie as tolerâncias ou desative alguma restrição.`,
+      n_simulacoes_total: portfolios.length,
+      n_simulacoes_validas: portfoliosFiltrados.length,
+    }
+  }
+
+  const base = restricoesAtivas ? portfoliosFiltrados : portfolios
+  const maxSharpe = base.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
+  const minVolSample = base.reduce((best, p) => (p.vol < best.vol ? p : best))
+  const pesosMinVolSolver = solverMinVol(cov, n, minW, maxW)
+  const statsMinVolSolver = portfolioStats(pesosMinVolSolver)
+  const solverSatisfaz = !restricoesAtivas || satisfazRestricoes(pesosMinVolSolver, ativosValidos, restricoes)
+  const minVol = (solverSatisfaz && statsMinVolSolver.vol < minVolSample.vol)
+    ? { weights: pesosMinVolSolver, ...statsMinVolSolver }
+    : minVolSample
+
+  const ercSatisfaz = !restricoesAtivas || satisfazRestricoes(pesosRP, ativosValidos, restricoes)
+
+  return {
+    classe,
+    label_classe: LABELS_CLASSE[classe] || classe,
+    ativos: ativosComDados.map((a) => ({
+      nome: a.nome, identificador: a.identificador, tipo: a.tipo,
+      n_meses_com_dados: a.n_meses_com_dados,
+      valido: ativosValidos.some((v) => v.identificador === a.identificador),
+    })),
+    fronteira: base.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe, weights: toWeightMap(p) })),
+    max_sharpe: { ...maxSharpe, weights: toWeightMap(maxSharpe) },
+    min_vol: { ...minVol, weights: toWeightMap(minVol) },
+    paridade_risco: {
+      weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP),
+      ...(restricoesAtivas && !ercSatisfaz ? { viola_restricoes: true } : {}),
+    },
+    atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
+    n_meses: T,
+    n_simulacoes: nSimulacoes,
+    ...(restricoesAtivas ? { n_simulacoes_total: portfolios.length, n_simulacoes_validas: portfoliosFiltrados.length } : {}),
+  }
+}
+
+// ── Otimizador livre (sem carteira) ────────────────────────
+
+function gerarMeses(mesInicioStr, mesFimStr) {
+  const meses = []
+  let [y, mo] = mesInicioStr.split('-').map(Number)
+  const [fy, fm] = mesFimStr.split('-').map(Number)
+  while (y < fy || (y === fy && mo <= fm)) {
+    meses.push(`${y}-${String(mo).padStart(2, '0')}`)
+    mo++; if (mo > 12) { mo = 1; y++ }
+  }
+  return meses
+}
+
+// Séries de dados reais por classe (ausência = usando estimativa/fallback)
+const SERIES_BENCHMARK_CLASSE = {
+  pos_fixado:      ['DEBB11_MENSAL'],
+  inflacao:        ['IMAB11_MENSAL'],
+  prefixado:       ['IRFM11_MENSAL'],
+  rf_global:       ['AGG_MENSAL', 'IRX_MENSAL'],
+  multimercado:    ['IHFA_MENSAL'],
+  rv_brasil:       ['IBOV_MENSAL'],
+  fundos_listados: ['IFIX_MENSAL'],
+  rv_global:       ['ACWI_MENSAL', 'IRX_MENSAL'],
+  // alternativos: usa CDI direto, sem série real própria
+}
+
+export function otimizarMacroLivre(dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1, classesParam = null) {
+  const db = getDb()
+  const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+  const inicio24m = (() => {
+    const d = new Date(mesFimStr + '-01')
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  const mesInicioStr = dataInicio?.slice(0, 7) ?? inicio24m
+  const meses = gerarMeses(mesInicioStr, mesFimStr)
+
+  if (meses.length < 12) return { error: 'Período insuficiente (mínimo 12 meses).' }
+
+  const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
+  const cdiMedioMensal = cdiRows.length > 0
+    ? cdiRows.reduce((s, r) => s + r.valor / 100, 0) / cdiRows.length
+    : 0.01
+
+  // classesParam permite ao usuário escolher quais classes incluir.
+  // Se não informado, usa todas exceto 'alternativos' (CDI puro = variância ~zero, distorce a fronteira).
+  const CLASSES_VALIDAS = Object.keys(LABELS_CLASSE).filter(c => c !== 'alternativos')
+  const CLASSES = classesParam
+    ? classesParam.filter(c => CLASSES_VALIDAS.includes(c))
+    : CLASSES_VALIDAS
+
+  if (CLASSES.length < 2) return { error: 'Selecione ao menos 2 classes para otimizar.' }
+
+  const retornosMensais = meses.map((mes) => {
+    const mesData = mes + '-01'
+    const cdiRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?`).get(mesData)
+    const cdiMensal = cdiRow ? cdiRow.valor / 100 : cdiMedioMensal
+    const ipcaRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data=?`).get(mesData)
+    const ipcaMensal = ipcaRow ? ipcaRow.valor / 100 : 0.004
+    const row = { mes }
+    for (const cls of CLASSES) row[cls] = retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db)
+    return row
+  })
+
+  const classesAtivas = CLASSES.filter((cls) => retornosMensais.some((r) => r[cls] != null))
+  if (classesAtivas.length < 2) return { error: 'Dados de benchmark insuficientes. Sincronize os dados macro.' }
+
+  // Qualidade dos dados: conta meses com série real vs estimativa/fallback
+  const qualidade_dados = Object.fromEntries(
+    classesAtivas.map((cls) => {
+      const series = SERIES_BENCHMARK_CLASSE[cls]
+      if (!series) return [cls, { meses_reais: 0, total: meses.length, apenas_estimativa: true }]
+      const mesesReais = meses.filter((mes) =>
+        series.every((serie) => db.prepare(`SELECT 1 FROM dados_macro WHERE serie=? AND data=?`).get(serie, mes + '-01') != null)
+      ).length
+      return [cls, { meses_reais: mesesReais, total: meses.length, apenas_estimativa: false }]
+    })
+  )
+
+  const T = retornosMensais.length
+  const retMatrix = retornosMensais.map((row) => classesAtivas.map((cls) => row[cls] ?? 0))
+  const n = classesAtivas.length
+  const means = classesAtivas.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
+
+  const cov = Array.from({ length: n }, () => Array(n).fill(0))
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      cov[i][j] = retMatrix.reduce((s, row) => s + (row[i] - means[i]) * (row[j] - means[j]), 0) / Math.max(T - 1, 1)
+
+  const pesosAtuais = classesAtivas.map(() => 1 / classesAtivas.length)
+
+  function portfolioStats(weights) {
+    const retMensal = weights.reduce((s, w, i) => s + w * means[i], 0)
+    let variancia = 0
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) variancia += weights[i] * weights[j] * cov[i][j]
+    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(12)
+    const cagr = Math.pow(1 + retMensal, 12) - 1
+    const sharpe = vol > 0 ? (cagr - cdiMedioMensal * 12) / vol : 0
+    return { vol, cagr, sharpe }
+  }
+
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
+  const portfolios = []
+  for (let s = 0; s < nSimulacoes; s++) {
+    const raw = classesAtivas.map(() => -Math.log(Math.random()))
+    const sum = raw.reduce((a, b) => a + b, 0)
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) { weights = Array(n).fill(1 / n); break }
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
+    portfolios.push({ weights, ...portfolioStats(weights) })
+  }
+
   const maxSharpe = portfolios.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
   const minVolSample = portfolios.reduce((best, p) => (p.vol < best.vol ? p : best))
   const pesosMinVolSolver = solverMinVol(cov, n, minW, maxW)
@@ -1956,33 +2213,26 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
   const minVol = statsMinVolSolver.vol < minVolSample.vol
     ? { weights: pesosMinVolSolver, ...statsMinVolSolver }
     : minVolSample
-  const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
+
+  const toWeightMap = (p) => classesAtivas.reduce((o, cls, i) => ({ ...o, [cls]: p.weights[i] }), {})
 
   const pesosRP = (() => {
     const result = Array(n).fill(0)
     const fixed = new Set()
     let budget = 1
-
     while (true) {
       const freeIdx = Array.from({ length: n }, (_, i) => i).filter(i => !fixed.has(i))
       const m = freeIdx.length
       if (m === 0) break
       if (m === 1) { result[freeIdx[0]] = Math.max(minW, Math.min(maxW, budget)); break }
-
       const subCov = freeIdx.map(i => freeIdx.map(j => cov[i][j]))
-      const fixedContrib = freeIdx.map(i =>
-        [...fixed].reduce((s, k) => s + cov[i][k] * result[k], 0)
-      )
+      const fixedContrib = freeIdx.map(i => [...fixed].reduce((s, k) => s + cov[i][k] * result[k], 0))
       let subW = Array(m).fill(1 / m)
       for (let iter = 0; iter < 1000; iter++) {
-        const mrc = subW.map((_, ii) =>
-          budget * subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0) + fixedContrib[ii]
-        )
+        const mrc = subW.map((_, ii) => budget * subW.reduce((s, wj, jj) => s + subCov[ii][jj] * wj, 0) + fixedContrib[ii])
         const totalVar = subW.reduce((s, wi, ii) => s + wi * budget * mrc[ii], 0)
         if (totalVar <= 0) break
-        const newSubW = subW.map((wi, ii) =>
-          mrc[ii] > 0 && wi > 0 ? wi * Math.sqrt(totalVar / (m * budget * wi * mrc[ii])) : wi
-        )
+        const newSubW = subW.map((wi, ii) => mrc[ii] > 0 && wi > 0 ? wi * Math.sqrt(totalVar / (m * budget * wi * mrc[ii])) : wi)
         let maxChange = 0
         for (let ii = 0; ii < m; ii++) maxChange = Math.max(maxChange, Math.abs(newSubW[ii] - subW[ii]))
         subW = newSubW
@@ -1991,7 +2241,6 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       const sLoop = subW.reduce((a, b) => a + b, 0)
       if (sLoop > 1e-10) subW = subW.map(v => v / sLoop)
       freeIdx.forEach((i, ii) => { result[i] = subW[ii] * budget })
-
       const minViolI = freeIdx.filter(i => result[i] < minW - 1e-10)
       if (minViolI.length > 0) {
         const worstI = minViolI.reduce((a, b) => result[a] < result[b] ? a : b)
@@ -2008,10 +2257,141 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       }
       break
     }
-
-    const rpSum2 = result.reduce((a, b) => a + b, 0)
-    return rpSum2 > 1e-10 ? result.map(r => r / rpSum2) : Array(n).fill(1 / n)
+    const rpSum = result.reduce((a, b) => a + b, 0)
+    return rpSum > 1e-10 ? result.map(r => r / rpSum) : Array(n).fill(1 / n)
   })()
+
+  return {
+    fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe, weights: toWeightMap(p) })),
+    max_sharpe: { weights: toWeightMap(maxSharpe), vol: maxSharpe.vol, cagr: maxSharpe.cagr, sharpe: maxSharpe.sharpe },
+    min_vol: { weights: toWeightMap(minVol), vol: minVol.vol, cagr: minVol.cagr, sharpe: minVol.sharpe },
+    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
+    atual: { weights: toWeightMap({ weights: pesosAtuais }), ...portfolioStats(pesosAtuais) },
+    classes: classesAtivas,
+    labels: classesAtivas.map((cls) => LABELS_CLASSE[cls]),
+    qualidade_dados,
+    n_meses: T,
+    n_simulacoes: nSimulacoes,
+    livre: true,
+  }
+}
+
+export function otimizarAtivosLivre(classe, ativosParam, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1, restricoes = {}) {
+  const db = getDb()
+  const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+  const inicio24m = (() => {
+    const d = new Date(mesFimStr + '-01')
+    d.setMonth(d.getMonth() - 23)
+    return d.toISOString().slice(0, 7)
+  })()
+  const mesInicioStr = dataInicio?.slice(0, 7) ?? inicio24m
+  const meses = gerarMeses(mesInicioStr, mesFimStr)
+
+  if (meses.length < 3) return { error: 'Período insuficiente de dados (mínimo 3 meses).' }
+
+  const ativosComDados = ativosParam.map((ativo) => {
+    const retornosMensais = meses.map((mes) => {
+      const [ano, m] = mes.split('-').map(Number)
+      const inicioMes = `${mes}-01`
+      const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
+      const produto = db.prepare(`SELECT * FROM produtos WHERE identificador = ? AND tipo = ? LIMIT 1`).get(ativo.identificador, ativo.tipo)
+      if (!produto) return null
+      return calcularRetornoProduto(produto, inicioMes, fimMes)
+    })
+    return { ...ativo, retornosMensais, n_meses_com_dados: retornosMensais.filter((r) => r != null).length }
+  })
+
+  const minMeses = Math.max(3, Math.ceil(meses.length * 0.3))
+  const ativosValidos = ativosComDados.filter((a) => a.n_meses_com_dados >= minMeses)
+
+  if (ativosValidos.length < 2) {
+    return {
+      error: 'Dados insuficientes para simular. Sincronize as cotas dos ativos primeiro.',
+      ativos: ativosComDados.map((a) => ({
+        nome: a.nome, identificador: a.identificador, tipo: a.tipo,
+        n_meses_com_dados: a.n_meses_com_dados, valido: a.n_meses_com_dados >= minMeses,
+      })),
+    }
+  }
+
+  const T = meses.length
+  const retMatrix = meses.map((_, mi) => ativosValidos.map((a) => a.retornosMensais[mi] ?? 0))
+  const n = ativosValidos.length
+  const means = ativosValidos.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
+
+  const cov = Array.from({ length: n }, () => Array(n).fill(0))
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      cov[i][j] = retMatrix.reduce((s, row) => s + (row[i] - means[i]) * (row[j] - means[j]), 0) / Math.max(T - 1, 1)
+
+  const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
+  const cdiMedioMensal = cdiRows.length > 0
+    ? cdiRows.reduce((s, r) => s + r.valor / 100, 0) / cdiRows.length
+    : 0.01
+
+  const pesosAtuais = ativosValidos.map(() => 1 / ativosValidos.length)
+
+  function portfolioStats(weights) {
+    const retMensal = weights.reduce((s, w, i) => s + w * means[i], 0)
+    let variancia = 0
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) variancia += weights[i] * weights[j] * cov[i][j]
+    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(12)
+    const cagr = Math.pow(1 + retMensal, 12) - 1
+    const sharpe = vol > 0 ? (cagr - cdiMedioMensal * 12) / vol : 0
+    return { vol, cagr, sharpe }
+  }
+
+  const minW = n > 0 ? Math.min(minPeso, (1 - 1e-6) / n) : 0
+  const maxW = n > 0 ? Math.max(maxPeso, 1 / n + 1e-10) : 1
+  const remaining = 1 - n * minW
+
+  const portfolios = []
+  for (let s = 0; s < nSimulacoes; s++) {
+    const raw = ativosValidos.map(() => -Math.log(Math.random()))
+    const sum = raw.reduce((a, b) => a + b, 0)
+    let weights = raw.map((v) => minW + remaining * v / sum)
+    for (let iter = 0; iter < 30; iter++) {
+      const excess = weights.reduce((s, wi) => s + Math.max(0, wi - maxW), 0)
+      if (excess < 1e-10) break
+      weights = weights.map(wi => Math.min(wi, maxW))
+      const freeTotal = weights.reduce((s, wi) => s + (wi < maxW - 1e-10 ? wi : 0), 0)
+      if (freeTotal < 1e-10) { weights = Array(n).fill(1 / n); break }
+      weights = weights.map(wi => wi < maxW - 1e-10 ? wi + excess * wi / freeTotal : wi)
+    }
+    const wSum = weights.reduce((a, b) => a + b, 0)
+    if (Math.abs(wSum - 1) > 1e-10) weights = weights.map(w => w / wSum)
+    portfolios.push({ weights, ...portfolioStats(weights) })
+  }
+
+  const toWeightMap = (p) => ativosValidos.reduce((o, a, i) => ({ ...o, [a.identificador]: p.weights[i] }), {})
+
+  const pesosRP = calcERC(n, cov, minW, maxW)
+
+  const restricoesAtivas = (restricoes.target_duration != null) || (restricoes.max_portfolio_min != null)
+  const portfoliosFiltrados = restricoesAtivas
+    ? aplicarFiltros(portfolios, ativosValidos, restricoes)
+    : portfolios
+
+  if (restricoesAtivas && portfoliosFiltrados.length < 10) {
+    return {
+      error: `Apenas ${portfoliosFiltrados.length} de ${portfolios.length} simulações atendem às restrições. Amplie as tolerâncias ou desative alguma restrição.`,
+      n_simulacoes_total: portfolios.length,
+      n_simulacoes_validas: portfoliosFiltrados.length,
+    }
+  }
+
+  const base = restricoesAtivas ? portfoliosFiltrados : portfolios
+  const maxSharpe = base.reduce((best, p) => (p.sharpe > best.sharpe ? p : best))
+  const minVolSample = base.reduce((best, p) => (p.vol < best.vol ? p : best))
+  const pesosMinVolSolver = solverMinVol(cov, n, minW, maxW)
+  const statsMinVolSolver = portfolioStats(pesosMinVolSolver)
+  const solverSatisfaz = !restricoesAtivas || satisfazRestricoes(pesosMinVolSolver, ativosValidos, restricoes)
+  const minVol = (solverSatisfaz && statsMinVolSolver.vol < minVolSample.vol)
+    ? { weights: pesosMinVolSolver, ...statsMinVolSolver }
+    : minVolSample
+
+  const ercSatisfaz = !restricoesAtivas || satisfazRestricoes(pesosRP, ativosValidos, restricoes)
 
   return {
     classe,
@@ -2021,13 +2401,18 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       n_meses_com_dados: a.n_meses_com_dados,
       valido: ativosValidos.some((v) => v.identificador === a.identificador),
     })),
-    fronteira: portfolios.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe })),
+    fronteira: base.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe, weights: toWeightMap(p) })),
     max_sharpe: { ...maxSharpe, weights: toWeightMap(maxSharpe) },
     min_vol: { ...minVol, weights: toWeightMap(minVol) },
-    paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
-    atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
+    paridade_risco: {
+      weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP),
+      ...(restricoesAtivas && !ercSatisfaz ? { viola_restricoes: true } : {}),
+    },
+    atual: null,
     n_meses: T,
     n_simulacoes: nSimulacoes,
+    livre: true,
+    ...(restricoesAtivas ? { n_simulacoes_total: portfolios.length, n_simulacoes_validas: portfoliosFiltrados.length } : {}),
   }
 }
 
