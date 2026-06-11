@@ -9,7 +9,11 @@ import {
   ChevronRight,
   Briefcase,
   Sliders,
+  RefreshCw,
+  Check,
+  X,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useCarteiras } from '../../hooks/useCarteiras'
 import { clsx } from 'clsx'
 
@@ -25,6 +29,21 @@ const navItems = [
 export default function Sidebar() {
   const { carteiras, loading } = useCarteiras()
   const location = useLocation()
+  const [syncState, setSyncState] = useState('idle') // idle | syncing | ok | error
+
+  async function handleSync(e) {
+    e.preventDefault()
+    if (syncState === 'syncing') return
+    setSyncState('syncing')
+    try {
+      const res = await fetch('/api/cotas/sync-all', { method: 'POST' })
+      setSyncState(res.ok ? 'ok' : 'error')
+    } catch {
+      setSyncState('error')
+    } finally {
+      setTimeout(() => setSyncState('idle'), 2000)
+    }
+  }
 
   return (
     <aside className="w-56 bg-bg-secondary border-r border-border flex flex-col h-screen sticky top-0">
@@ -45,22 +64,43 @@ export default function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-3">
         {/* Main nav */}
         <div className="px-2 space-y-0.5 mb-4">
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors',
-                  isActive
-                    ? 'bg-accent-blue/15 text-accent-blue font-medium'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-bg-tertiary'
-                )
-              }
-            >
-              <Icon size={15} />
-              {label}
-            </NavLink>
+          {navItems.map(({ to, icon: Icon, label }, idx) => (
+            <div key={to} className="flex items-center gap-1">
+              <NavLink
+                to={to}
+                className={({ isActive }) =>
+                  clsx(
+                    'flex flex-1 items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors',
+                    isActive
+                      ? 'bg-accent-blue/15 text-accent-blue font-medium'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-bg-tertiary'
+                  )
+                }
+              >
+                <Icon size={15} />
+                {label}
+              </NavLink>
+
+              {idx === 0 && (
+                <button
+                  onClick={handleSync}
+                  disabled={syncState === 'syncing'}
+                  title="Sincronizar dados"
+                  className={clsx(
+                    'flex-shrink-0 p-1.5 rounded-md transition-colors',
+                    syncState === 'ok'    && 'text-emerald-400',
+                    syncState === 'error' && 'text-red-400',
+                    syncState === 'idle' || syncState === 'syncing'
+                      ? 'text-slate-600 hover:text-slate-300 hover:bg-bg-tertiary'
+                      : ''
+                  )}
+                >
+                  {syncState === 'ok'    ? <Check size={13} /> :
+                   syncState === 'error' ? <X size={13} /> :
+                   <RefreshCw size={13} className={syncState === 'syncing' ? 'animate-spin' : ''} />}
+                </button>
+              )}
+            </div>
           ))}
         </div>
 

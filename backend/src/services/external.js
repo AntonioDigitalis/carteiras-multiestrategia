@@ -554,15 +554,16 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
   }
 
   const stmt = db.prepare(
-    // COALESCE: preserva valor_ajustado existente quando a nova fonte não tem ajuste (null).
-    // Evita que B3/COTAHIST/Alpha Vantage sobrescrevam o valor_ajustado correto do Yahoo.
-    // Yahoo sempre fornece valor_ajustado não-null → sobrescreve normalmente.
+    // Regra de prioridade:
+    // 1. Dados 'economatica' são imutáveis — nunca sobrescrever com Yahoo/B3/etc.
+    // 2. Para outras fontes: preserva valor_ajustado existente quando a nova fonte não tem ajuste (null).
+    //    Evita que B3/COTAHIST/Alpha Vantage sobrescrevam o valor_ajustado correto do Yahoo.
     `INSERT INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(produto_id, data) DO UPDATE SET
-       valor = excluded.valor,
-       valor_ajustado = COALESCE(excluded.valor_ajustado, cotas_cache.valor_ajustado),
-       fonte = excluded.fonte`
+       valor          = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.valor          ELSE excluded.valor END,
+       valor_ajustado = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.valor_ajustado ELSE COALESCE(excluded.valor_ajustado, cotas_cache.valor_ajustado) END,
+       fonte          = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.fonte          ELSE excluded.fonte END`
   )
   const insertMany = db.transaction((produtoId, r) => {
     for (const row of r) stmt.run(produtoId, row.date, row.close, row.adjustedClose, fonte)

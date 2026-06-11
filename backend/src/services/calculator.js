@@ -1641,12 +1641,33 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const CLASSES = Object.keys(LABELS_CLASSE)
 
   // Usar apenas classes com dados
-  const classesAtivas = CLASSES.filter((cls) => retornosMensais.some((r) => r[cls] != null))
+  let classesAtivas = CLASSES.filter((cls) => retornosMensais.some((r) => r[cls] != null))
   if (classesAtivas.length < 2) return { error: 'Dados insuficientes. Adicione produtos às classes antes de otimizar.' }
 
-  const T = retornosMensais.length
+  // Janela adaptativa: avança o início até o ponto mais antigo onde todas as classes
+  // ativas têm ≥ 60% de cobertura real. Evita que classes com histórico curto
+  // contaminem a covariância com zeros excessivos (fill-zero vicia médias e variâncias).
+  const MIN_COVERAGE = 0.6
+  const MIN_MONTHS = 12
+  let retornosJanela = retornosMensais.length >= MIN_MONTHS
+    ? retornosMensais.slice(-MIN_MONTHS)
+    : retornosMensais
+  for (let i = 0; i <= retornosMensais.length - MIN_MONTHS; i++) {
+    const slice = retornosMensais.slice(i)
+    if (classesAtivas.every(cls => slice.filter(r => r[cls] != null).length / slice.length >= MIN_COVERAGE)) {
+      retornosJanela = slice
+      break
+    }
+  }
+  // Descarta classes sem cobertura suficiente na janela efetiva
+  classesAtivas = classesAtivas.filter(
+    cls => retornosJanela.filter(r => r[cls] != null).length / retornosJanela.length >= MIN_COVERAGE
+  )
+  if (classesAtivas.length < 2) return { error: 'Dados insuficientes. Adicione produtos às classes antes de otimizar.' }
+
+  const T = retornosJanela.length
   // Matriz de retornos (fill 0 quando classe sem dado no mês)
-  const retMatrix = retornosMensais.map((row) => classesAtivas.map((cls) => row[cls] ?? 0))
+  const retMatrix = retornosJanela.map((row) => classesAtivas.map((cls) => row[cls] ?? 0))
 
   const n = classesAtivas.length
   const means = classesAtivas.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
