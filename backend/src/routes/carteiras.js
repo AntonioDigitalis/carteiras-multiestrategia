@@ -383,6 +383,34 @@ router.post('/:id/duplicar-mes', (req, res) => {
   }
 })
 
+// DELETE /api/carteiras/:id/mes/:mes — apaga estados+produtos desta carteira no mês
+// Não toca na alocação macro (compartilhada por perfil entre as carteiras gêmeas)
+router.delete('/:id/mes/:mes', (req, res) => {
+  const db = getDb()
+  const { id, mes } = req.params
+  if (!/^\d{4}-\d{2}$/.test(mes)) {
+    return res.status(400).json({ error: 'mes deve ser YYYY-MM' })
+  }
+  const estados = db.prepare(
+    'SELECT id FROM estados_portfolio WHERE carteira_id = ? AND mes = ?'
+  ).all(id, mes)
+  if (estados.length === 0) {
+    return res.status(404).json({ error: `Nenhum estado encontrado em ${mes}` })
+  }
+  try {
+    db.transaction(() => {
+      for (const e of estados) {
+        db.prepare('DELETE FROM produtos WHERE estado_id = ?').run(e.id)
+        db.prepare('DELETE FROM estados_portfolio WHERE id = ?').run(e.id)
+      }
+    })()
+    res.json({ ok: true, estados_removidos: estados.length })
+  } catch (e) {
+    console.error('[delete-mes]', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // POST /api/carteiras/:id/estados
 router.post('/:id/estados', (req, res) => {
   const db = getDb()

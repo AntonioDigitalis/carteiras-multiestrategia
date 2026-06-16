@@ -41,6 +41,8 @@ export const api = {
     request(`/carteiras/${carteiraId}/alocacoes`, { method: 'POST', body: data }),
   duplicarMes: (carteiraId, mesOrigem, mesDestino) =>
     request(`/carteiras/${carteiraId}/duplicar-mes`, { method: 'POST', body: { mes_origem: mesOrigem, mes_destino: mesDestino } }),
+  excluirMes: (carteiraId, mes) =>
+    request(`/carteiras/${carteiraId}/mes/${mes}`, { method: 'DELETE' }),
 
   // Estados do portfólio (produtos por mês)
   getEstados: (carteiraId, mes) =>

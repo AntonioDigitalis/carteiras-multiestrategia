@@ -175,6 +175,24 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
   const [error, setError] = useState(null)
   const [tabEstado, setTabEstado] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
+  const [deleteStep, setDeleteStep] = useState(0)
+  const [deleting, setDeleting] = useState(false)
+  const [copyStep, setCopyStep] = useState(0)
+
+  async function excluirMesHandler() {
+    setDeleting(true)
+    setError(null)
+    try {
+      await api.excluirMes(carteiraId, mes)
+      setDeleteStep(0)
+      onSave()
+      setReloadKey((k) => k + 1)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function duplicarDoMes() {
     if (!mesAnterior) return
@@ -182,6 +200,7 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
     setError(null)
     try {
       await api.duplicarMes(carteiraId, mesAnterior, mes)
+      setCopyStep(0)
       onSave()
       setReloadKey((k) => k + 1)
     } catch (e) {
@@ -193,6 +212,8 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
 
   useEffect(() => {
     setLoading(true)
+    setDeleteStep(0)
+    setCopyStep(0)
     Promise.all([
       api.getAlocacoes(carteiraId).then((all) => all.find((a) => a.mes === mes) || null),
       api.getEstados(carteiraId, mes),
@@ -271,6 +292,61 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
             {duplicating ? 'Copiando...' : 'Copiar mês anterior'}
           </button>
         </div>
+      )}
+
+      {/* Copiar mês anterior em mês JÁ preenchido — substitui dados, dupla confirmação */}
+      {!estaVazio && mesAnterior && (
+        copyStep === 0 ? (
+          <div className="card flex items-center justify-between gap-4 py-3">
+            <div className="text-xs text-slate-400">
+              Copiar a alocação e os produtos de{' '}
+              <span className="text-slate-200 font-medium capitalize">
+                {format(new Date(mesAnterior + '-15'), 'MMMM yyyy', { locale: ptBR })}
+              </span>
+              {' '}para este mês.
+              <span className="text-yellow-400"> Substitui os dados atuais.</span>
+            </div>
+            <button
+              onClick={() => setCopyStep(1)}
+              className="btn-secondary text-xs py-1.5 px-3 shrink-0 flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copiar mês anterior
+            </button>
+          </div>
+        ) : (
+          <div className="card flex items-center gap-2 py-3 border-yellow-700/40">
+            <AlertTriangle size={14} className="text-yellow-400 shrink-0" />
+            <span className="text-xs text-yellow-300 flex-1">
+              {copyStep === 1
+                ? `Substituir os produtos e estados deste mês pelos de ${mesAnterior}? A alocação macro também será sobrescrita.`
+                : 'Confirmação final — os dados atuais deste mês serão perdidos.'}
+            </span>
+            <button
+              onClick={() => setCopyStep(0)}
+              disabled={duplicating}
+              className="btn-secondary text-xs py-1 px-2 shrink-0"
+            >
+              Cancelar
+            </button>
+            {copyStep === 1 ? (
+              <button
+                onClick={() => setCopyStep(2)}
+                className="text-xs py-1 px-2 rounded bg-yellow-700 text-white hover:bg-yellow-600 shrink-0"
+              >
+                Continuar
+              </button>
+            ) : (
+              <button
+                onClick={duplicarDoMes}
+                disabled={duplicating}
+                className="text-xs py-1 px-2 rounded bg-yellow-600 text-white hover:bg-yellow-500 shrink-0"
+              >
+                {duplicating ? 'Copiando...' : 'Substituir definitivamente'}
+              </button>
+            )}
+          </div>
+        )
       )}
 
       {/* Alocação Macro */}
@@ -399,11 +475,57 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
         </div>
       )}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-between items-center gap-2">
+        {/* Excluir dados do mês — dupla confirmação */}
+        <div>
+          {estados.some((e) => e.id) && (
+            deleteStep === 0 ? (
+              <button
+                onClick={() => setDeleteStep(1)}
+                className="text-xs text-accent-red hover:text-red-400 flex items-center gap-1.5"
+              >
+                <Trash2 size={13} />
+                Excluir dados deste mês
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+                <AlertTriangle size={14} className="text-accent-red shrink-0" />
+                <span className="text-xs text-red-300">
+                  {deleteStep === 1
+                    ? `Apagar todos os produtos e estados desta carteira em ${mes}? A alocação macro será mantida.`
+                    : 'Confirmação final — esta ação é irreversível.'}
+                </span>
+                <button
+                  onClick={() => setDeleteStep(0)}
+                  disabled={deleting}
+                  className="btn-secondary text-xs py-1 px-2 shrink-0"
+                >
+                  Cancelar
+                </button>
+                {deleteStep === 1 ? (
+                  <button
+                    onClick={() => setDeleteStep(2)}
+                    className="text-xs py-1 px-2 rounded bg-red-800 text-white hover:bg-red-700 shrink-0"
+                  >
+                    Continuar
+                  </button>
+                ) : (
+                  <button
+                    onClick={excluirMesHandler}
+                    disabled={deleting}
+                    className="text-xs py-1 px-2 rounded bg-red-600 text-white hover:bg-red-500 flex items-center gap-1 shrink-0"
+                  >
+                    {deleting ? 'Excluindo...' : (<><Trash2 size={12} />Excluir definitivamente</>)}
+                  </button>
+                )}
+              </div>
+            )
+          )}
+        </div>
         <button
           onClick={salvar}
           disabled={saving || !totalOk}
-          className="btn-primary flex items-center gap-2"
+          className="btn-primary flex items-center gap-2 shrink-0"
         >
           {saving ? 'Salvando...' : 'Salvar Alocação Macro'}
           {!saving && <Check size={14} />}
