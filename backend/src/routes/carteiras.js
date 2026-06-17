@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getDb } from '../db/database.js'
 import { calcularMetricas, calcularAtribuicao, calcularPassiva, otimizarCarteira, otimizarDentroClasse, calcularDadosExcel, calcularCorrelacao, calcularPainelMercado, calcularDadosDiariosPorProduto } from '../services/calculator.js'
-import { garantirDadosMacro, fetchHistoricoBrapi } from '../services/external.js'
+import { garantirDadosMacro, garantirIndicesDiarios, fetchHistoricoBrapi } from '../services/external.js'
 
 const router = Router()
 
@@ -465,10 +465,13 @@ router.get('/:id/correlacao', async (req, res) => {
 })
 
 // GET /api/carteiras/:id/atribuicao
-router.get('/:id/atribuicao', (req, res) => {
+router.get('/:id/atribuicao', async (req, res) => {
   try {
     const { start, end } = req.query
     if (!validateDateRange(start, end, res)) return
+    // Estende as séries diárias de índice além da Economatica (Yahoo) quando o
+    // período pedido alcança dias recentes — para clipar o benchmark nas bordas.
+    await garantirIndicesDiarios(end || null)
     const data = calcularAtribuicao(Number(req.params.id), start || null, end || null)
     res.json(data)
   } catch (e) {

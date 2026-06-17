@@ -2443,6 +2443,53 @@ function getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, mes, db) {
   return retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db)
 }
 
+// ── Benchmark por janela arbitrária (diário) ───────────────
+// Usado para clipar o benchmark nos meses de borda parciais da atribuição.
+
+// Retorno de uma série de NÍVEL diário (índice/preço) em [inicio,fim]:
+// primeiro nível em data>=inicio, último em data<=fim.
+function retornoNivelDiario(serie, inicio, fim, db) {
+  const v0 = db.prepare(`SELECT valor FROM dados_macro WHERE serie=? AND data>=? AND data<=? ORDER BY data LIMIT 1`).get(serie, inicio, fim)
+  const v1 = db.prepare(`SELECT valor FROM dados_macro WHERE serie=? AND data>=? AND data<=? ORDER BY data DESC LIMIT 1`).get(serie, inicio, fim)
+  if (!v0 || !v1 || v0.valor == null || v1.valor == null || v0.valor <= 0) return null
+  return v1.valor / v0.valor - 1
+}
+
+// CDI composto em [inicio,fim] a partir do CDI_DIARIO (valor = % ao dia).
+function retornoCDIPeriodo(inicio, fim, db) {
+  const rows = db.prepare(`SELECT valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data>=? AND data<=? ORDER BY data`).all(inicio, fim)
+  if (!rows.length) return null
+  let f = 1
+  for (const r of rows) f *= (1 + r.valor / 100)
+  return f - 1
+}
+
+function contarDiasUteis(inicio, fim, db) {
+  return db.prepare(`SELECT COUNT(*) n FROM dados_macro WHERE serie='CDI_DIARIO' AND data>=? AND data<=?`).get(inicio, fim).n
+}
+
+// Benchmark da classe numa janela arbitrária, a partir das séries diárias.
+// Retorna null quando não há série diária para a classe (rf_global/rv_global,
+// ou IHFA/DEBB11 além da cobertura) — o chamador faz fallback pro-rata.
+const SERIE_DIARIA_CLASSE = {
+  inflacao: 'IMAB_DIARIO',
+  prefixado: 'IRFM_DIARIO',
+  rv_brasil: 'IBOV_DIARIO',
+  fundos_listados: 'IFIX_DIARIO',
+  multimercado: 'IHFA_DIARIO',
+}
+function retornoBenchmarkPeriodo(cls, inicio, fim, db) {
+  if (cls === 'alternativos') return retornoCDIPeriodo(inicio, fim, db)
+  if (cls === 'pos_fixado') {
+    const cdi = retornoCDIPeriodo(inicio, fim, db)
+    const debb = retornoNivelDiario('DEBB11_DIARIO', inicio, fim, db)
+    if (cdi == null || debb == null) return null
+    return 0.7 * cdi + 0.3 * debb
+  }
+  const serie = SERIE_DIARIA_CLASSE[cls]
+  return serie ? retornoNivelDiario(serie, inicio, fim, db) : null
+}
+
 // ── Atribuição por classe ───────────────────────────────────
 
 export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
@@ -2475,8 +2522,12 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     ).all(carteiraId, aloc.mes)
 
     const [ano, m] = aloc.mes.split('-').map(Number)
-    const inicioMes = `${aloc.mes}-01`
-    const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
+    const primeiroDiaMes = `${aloc.mes}-01`
+    const ultimoDiaMes = new Date(ano, m, 0).toISOString().split('T')[0]
+    // Clipa as bordas ao período selecionado: o primeiro e o último mês podem
+    // ser parciais. Sem isso, a atribuição soma sempre meses inteiros.
+    const inicioMes = (dataInicio && dataInicio > primeiroDiaMes) ? dataInicio : primeiroDiaMes
+    const fimMes = (dataFim && dataFim < ultimoDiaMes) ? dataFim : ultimoDiaMes
 
     // Macro do mês
     const cdiRow = db.prepare(
@@ -2488,11 +2539,29 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     const cdiMensal = cdiRow ? cdiRow.valor / 100 : 0
     const ipcaMensal = ipcaRow ? ipcaRow.valor / 100 : 0
 
+    // Mês de borda parcial? (primeiro/último mês clipado ao período)
+    const mesParcial = inicioMes !== primeiroDiaMes || fimMes !== ultimoDiaMes
+    const duMes = mesParcial ? contarDiasUteis(primeiroDiaMes, ultimoDiaMes, db) : 0
+    const duJanela = mesParcial ? contarDiasUteis(inicioMes, fimMes, db) : 0
+
     for (const cls of Object.keys(CLASSES)) {
       const pesoClasse = (aloc[cls] || 0) / 100
       if (pesoClasse === 0) continue
 
-      const benchmarkMes = getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, aloc.mes, db)
+      // Mês cheio: benchmark mensal. Mês parcial: usa série diária (exato);
+      // sem série diária (rf_global/rv_global, IHFA além da cobertura) → pro-rata por dias úteis.
+      let benchmarkMes
+      if (!mesParcial) {
+        benchmarkMes = getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, aloc.mes, db)
+      } else {
+        const exato = retornoBenchmarkPeriodo(cls, inicioMes, fimMes, db)
+        if (exato != null) {
+          benchmarkMes = exato
+        } else {
+          const cheio = getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, aloc.mes, db)
+          benchmarkMes = duMes > 0 ? cheio * (duJanela / duMes) : cheio
+        }
+      }
 
       // Coletar todos os produtos desta classe neste mês
       const todosProdutos = []

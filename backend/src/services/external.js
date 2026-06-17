@@ -566,11 +566,34 @@ export async function fetchHistoricoBrapi(ticker, dataInicio, dataFim) {
        fonte          = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.fonte          ELSE excluded.fonte END`
   )
   const insertMany = db.transaction((produtoId, r) => {
-    for (const row of r) stmt.run(produtoId, row.date, row.close, row.adjustedClose, fonte)
+    const ajustadas = _reancorarEmEconomatica(db, produtoId, r, fonte)
+    for (const row of ajustadas) stmt.run(produtoId, row.date, row.close, row.adjustedClose, fonte)
   })
 
   registrarLog(fonte, ticker, rows.length, rows.length > 0 ? 'ok' : 'sem_dados', null)
   return { rows, insertMany }
+}
+
+// Quando uma fonte (Yahoo/B3/etc.) estende cotas que já têm histórico
+// 'economatica', as escalas podem diferir (a Economatica usa bases próprias).
+// Reancora a nova série no nível Economatica da emenda, neutralizando o salto:
+// considera-se só a VARIAÇÃO dia-a-dia da nova base, não seu nível absoluto.
+// Só atua quando o salto na emenda é > 40% (escala incompatível); movimentos
+// reais menores ficam intactos.
+function _reancorarEmEconomatica(db, produtoId, rows, fonte) {
+  if (fonte === 'economatica' || !rows?.length) return rows
+  const econ = db.prepare(
+    `SELECT data, valor FROM cotas_cache WHERE produto_id = ? AND fonte = 'economatica' ORDER BY data DESC LIMIT 1`
+  ).get(produtoId)
+  if (!econ || !econ.valor) return rows
+  const ancora = [...rows].filter((x) => x.date > econ.data && x.close > 0).sort((a, b) => a.date.localeCompare(b.date))[0]
+  if (!ancora) return rows
+  if (Math.abs(ancora.close / econ.valor - 1) <= 0.40) return rows  // movimento real plausível
+  const fator = econ.valor / ancora.close
+  if (!isFinite(fator) || fator <= 0) return rows
+  return rows.map((x) => x.date > econ.data
+    ? { ...x, close: x.close * fator, adjustedClose: x.adjustedClose != null ? x.adjustedClose * fator : null }
+    : x)
 }
 
 function _persistirEventosYahoo(ticker, events) {
@@ -919,4 +942,63 @@ export async function fetchIndicesMercado(dataInicio, dataFim) {
   }
 
   return total
+}
+
+// ── Índices DIÁRIOS (extensão da Economatica via Yahoo) ─────
+// As séries *_DIARIO vêm da planilha Economatica (fonte primária, níveis em
+// base própria). Para dias além da cobertura da planilha, estende-se com o
+// Yahoo ENCADEANDO RETORNOS: reescala a cotação Yahoo no ponto de emenda para
+// o nível Economatica (as escalas/bases diferem). Nunca sobrescreve economatica.
+const INDICES_DIARIOS = [
+  { serie: 'IBOV_DIARIO',   symbol: '^BVSP' },
+  { serie: 'IMAB_DIARIO',   symbol: 'IMAB11.SA' },
+  { serie: 'IRFM_DIARIO',   symbol: 'IRFM11.SA' },
+  { serie: 'IFIX_DIARIO',   symbol: 'XFIX11.SA' },
+  { serie: 'DEBB11_DIARIO', symbol: 'DEBB11.SA' },
+  // IHFA_DIARIO: sem proxy no Yahoo → não estende (atribuição usa pro-rata mensal)
+]
+
+export async function garantirIndicesDiarios(dataFim) {
+  const db = getDb()
+  const hoje = new Date().toISOString().split('T')[0]
+  const fim = (dataFim && dataFim < hoje) ? dataFim : hoje
+
+  const stmt = db.prepare(`
+    INSERT INTO dados_macro (serie, data, valor, fonte) VALUES (?, ?, ?, 'yahoo_ext')
+    ON CONFLICT(serie, data) DO UPDATE SET
+      valor = CASE WHEN dados_macro.fonte = 'economatica' THEN dados_macro.valor ELSE excluded.valor END,
+      fonte = CASE WHEN dados_macro.fonte = 'economatica' THEN dados_macro.fonte ELSE excluded.fonte END
+  `)
+
+  for (const { serie, symbol } of INDICES_DIARIOS) {
+    try {
+      const last = db.prepare(`SELECT data, valor FROM dados_macro WHERE serie=? ORDER BY data DESC LIMIT 1`).get(serie)
+      if (!last) continue  // sem base Economatica para ancorar
+      // Já coberto (folga de 4 dias cobre fins de semana/feriados sem refetch)
+      if (Math.round((new Date(fim) - new Date(last.data)) / 86400000) <= 4) continue
+
+      const buf = new Date(last.data); buf.setDate(buf.getDate() - 7)
+      const result = await _yf.chart(symbol, { period1: buf.toISOString().split('T')[0], period2: fim, interval: '1d' })
+      const quotes = (result.quotes || [])
+        .filter((q) => q.close != null)
+        .map((q) => ({ data: q.date.toISOString().split('T')[0], close: q.adjclose ?? q.close }))
+
+      // Âncora: cotação Yahoo na (ou imediatamente antes da) última data Economatica
+      const anchor = [...quotes].reverse().find((q) => q.data <= last.data)
+      if (!anchor || anchor.close <= 0) continue
+      const fator = last.valor / anchor.close
+
+      let n = 0
+      db.transaction(() => {
+        for (const q of quotes) {
+          if (q.data <= last.data) continue  // preserva o histórico Economatica
+          stmt.run(serie, q.data, q.close * fator)
+          n++
+        }
+      })()
+      if (n > 0) registrarLog('yahoo', serie, n, 'ok', `extensão diária após ${last.data}`)
+    } catch (e) {
+      console.warn(`[indices-diario] ${serie}:`, e.message)
+    }
+  }
 }
