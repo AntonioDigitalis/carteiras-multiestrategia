@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MARA — Motor de Alocação, Risco e Análise</title>
+
+<!-- ── Google Fonts ──────────────────────────────────────────────
+     Space Grotesk → logo final / UI
+     Space Mono    → scramble + textos auxiliares (clima quant) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+
+<style>
+  /* ── Tema dark quant ── */
+  :root {
+    --bg:        #0B0F14; /* fundo grafite/azulado */
+    --ink:       #E6EDF3; /* texto claro / convergido */
+    --cyan:      #22D3EE; /* destaque ciano / scramble */
+    --blue:      #3B82F6; /* azul das trajetórias */
+    --muted:     #5B6B7A; /* textos discretos */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Space Mono", monospace;
+    overflow: hidden;
+  }
+
+  /* Canvas Monte Carlo ocupa toda a tela, atrás de tudo */
+  #mc {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+  }
+
+  /* Leve vinheta para dar profundidade ao fundo */
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at 50% 45%, rgba(11,15,20,0) 35%, rgba(11,15,20,.85) 100%);
+  }
+
+  /* Camada de conteúdo, centralizada em qualquer resolução */
+  .stage {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+  }
+
+  /* Texto que se transforma (scramble) */
+  #logo {
+    margin: 0;
+    font-family: "Space Mono", monospace;   /* mono durante o scramble: não "treme" */
+    font-weight: 700;
+    font-size: clamp(22px, 5.2vw, 56px);
+    letter-spacing: .04em;
+    line-height: 1.15;
+    min-height: 1.2em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 90vw;
+    transition: letter-spacing .6s ease;
+  }
+  /* caractere ainda embaralhando */
+  #logo .scram { color: var(--cyan); }
+  /* caractere já convergido */
+  #logo .lock  { color: var(--ink); }
+
+  /* Estado final: logo "MARA" em Space Grotesk com glow ciano */
+  #logo.final {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    letter-spacing: .14em;
+    font-size: clamp(46px, 12vw, 130px);
+    color: var(--ink);
+    text-shadow:
+      0 0 14px rgba(34,211,238,.55),
+      0 0 38px rgba(34,211,238,.30),
+      0 0 80px rgba(34,211,238,.12);
+  }
+
+  /* ── Bloco final (revelado ao fim da sequência) ── */
+  .outro {
+    margin-top: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .8s ease, transform .8s ease;
+    pointer-events: none;
+  }
+  .outro.show { opacity: 1; transform: none; pointer-events: auto; }
+
+  .subtitle {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 500;
+    font-size: clamp(12px, 2vw, 16px);
+    letter-spacing: .26em;
+    text-transform: uppercase;
+    color: var(--cyan);
+  }
+
+  /* indicador "simulando…" com pontinhos animados */
+  .sim {
+    font-family: "Space Mono", monospace;
+    font-size: 13px;
+    letter-spacing: .12em;
+    color: var(--muted);
+  }
+  .sim .dots::after {
+    content: "";
+    animation: dots 1.4s steps(4, end) infinite;
+  }
+  @keyframes dots {
+    0%   { content: ""; }
+    25%  { content: "."; }
+    50%  { content: ".."; }
+    75%  { content: "..."; }
+    100% { content: ""; }
+  }
+
+  .enter-btn {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--cyan);
+    border-radius: 10px;
+    padding: 13px 34px;
+    cursor: pointer;
+    transition: background .25s ease, box-shadow .25s ease, transform .12s ease;
+  }
+  .enter-btn:hover {
+    background: rgba(34,211,238,.12);
+    box-shadow: 0 0 22px rgba(34,211,238,.35);
+  }
+  .enter-btn:active { transform: translateY(1px); }
+  .enter-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+  /* Botão "pular" discreto (canto superior direito) */
+  .skip-btn {
+    position: fixed;
+    top: 22px;
+    right: 24px;
+    z-index: 3;
+    font-family: "Space Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid rgba(91,107,122,.4);
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: color .2s ease, border-color .2s ease, opacity .4s ease;
+  }
+  .skip-btn:hover { color: var(--cyan); border-color: rgba(34,211,238,.5); }
+  .skip-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  .skip-btn.hidden { opacity: 0; pointer-events: none; }
+
+  /* ── prefers-reduced-motion: troca de texto simples por fade ── */
+  @media (prefers-reduced-motion: reduce) {
+    #logo { transition: opacity .5s ease; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="mc"></canvas>
+  <div class="vignette"></div>
+
+  <button class="skip-btn" id="skipBtn" type="button" title="Pular intro (Esc)">Pular ›</button>
+
+  <main class="stage">
+    <h1 id="logo" aria-live="polite"></h1>
+
+    <div class="outro" id="outro">
+      <div class="subtitle">Motor de Alocação, Risco e Análise</div>
+      <div class="sim">simulando<span class="dots"></span></div>
+      <button class="enter-btn" id="enterBtn" type="button">Entrar</button>
+    </div>
+  </main>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   PARAMETRIZAÇÃO  (ajuste tudo aqui)
+   ════════════════════════════════════════════════════════════════ */
+
+// Roteiro: cada frase se transforma na próxima, na ordem.
+// A última permanece como logo final.
+const TEXTS = [
+  "Projeto Mara",
+  "Mara",
+  "Motor de Alocação, Risco e Análise",
+  "Multiestratégia Research Asset Allocation",
+  "MARA", // ← logo final (permanece)
+];
+
+// Duração de cada etapa em ms (uma por item de TEXTS, exceto a última,
+// que não tem duração porque é o estado final). Dê tempo para o
+// scramble convergir + uma pausa de leitura.
+const STAGE_DURATIONS = [2800, 2400, 4200, 4600];
+
+// Paleta (tema dark quant)
+const COLORS = {
+  bg:    "#0B0F14",
+  ink:   "#E6EDF3",
+  cyan:  "#22D3EE",
+  blue:  "#3B82F6",
+};
+
+// Efeito de embaralhamento (estilo Monte Carlo)
+const SCRAMBLE = {
+  frameMs: 40,   // velocidade do embaralhamento (ms entre re-randomizações)
+  perChar: 12,   // nº de iterações que cada caractere "testa" antes de travar
+  stagger: 55,   // defasagem (ms) entre o travamento de letras vizinhas (esq→dir)
+  chars:   "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@<>/\\+=*",
+};
+
+// Fundo: simulação Monte Carlo com viés de alta
+const MONTE_CARLO = {
+  lines:     26,    // nº de trajetórias secundárias
+  opacity:   0.16,  // opacidade base das trajetórias secundárias
+  speed:     0.45,  // velocidade da oscilação em tempo real
+  noise:     0.9,   // intensidade do ruído/ondulação
+  amplitude: 0.10,  // amplitude da oscilação (fração da altura)
+  drift:     0.42,  // tendência (>0 = ALTA; sobe da esquerda p/ direita)
+};
+
+/* ════════════════════════════════════════════════════════════════
+   Detecção de movimento reduzido
+   ════════════════════════════════════════════════════════════════ */
+const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const logoEl  = document.getElementById("logo");
+const outroEl = document.getElementById("outro");
+const enterBtn = document.getElementById("enterBtn");
+const skipBtn  = document.getElementById("skipBtn");
+
+// Estado compartilhado: true quando a sequência terminou (naturalmente ou via skip)
+let finished = false;
+
+/* ════════════════════════════════════════════════════════════════
+   CANVAS — Monte Carlo (trajetórias divergindo em leque, subindo)
+   ════════════════════════════════════════════════════════════════ */
+const canvas = document.getElementById("mc");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0;
+
+// Parâmetros aleatórios por linha (gerados uma vez)
+let lanes = [];
+function buildLanes() {
+  lanes = [];
+  for (let i = 0; i < MONTE_CARLO.lines; i++) {
+    lanes.push({
+      // cada linha tem inclinação de alta levemente diferente → leque
+      slope: MONTE_CARLO.drift * (0.45 + Math.random() * 1.15),
+      amp:   MONTE_CARLO.amplitude * (0.4 + Math.random()),
+      freq:  2 + Math.random() * 5,
+      phase: Math.random() * Math.PI * 2,
+      speed: (0.6 + Math.random() * 0.9),
+    });
+  }
+}
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // trata DPR sem serrilhado/blur
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.width  = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 1 unidade = 1px CSS
+}
+window.addEventListener("resize", resize);
+resize();
+buildLanes();
+
+// Geometria comum: todas as linhas partem de um ponto à esquerda
+const geo = () => ({
+  leftX:  W * 0.08,
+  rightX: W * 0.98,
+  startY: H * 0.64,   // baixo → sobem para o topo
+});
+
+// y de uma linha secundária em xf∈[0,1]; multiplica por xf para
+// que TODAS partam do mesmo ponto à esquerda e se abram para a direita.
+function laneY(l, xf, t) {
+  const g = geo();
+  const rise   = l.slope * xf * H;                                  // viés de alta
+  const wave   = l.amp * H * Math.sin(xf * l.freq + l.phase + t * l.speed) * xf;
+  const wobble = MONTE_CARLO.noise * 6 * Math.sin(xf * 14 + t * 0.7 + l.phase) * xf;
+  return g.startY - rise + wave + wobble; // Y cresce p/ baixo → subtraímos p/ subir
+}
+
+// Linha principal (ciano, glow, desenho progressivo + ponto na ponta)
+let mainProgress = 0;
+function mainY(xf, t) {
+  const g = geo();
+  const rise = MONTE_CARLO.drift * 1.55 * xf * H;       // sobe mais firme
+  const wave = MONTE_CARLO.amplitude * 0.45 * H * Math.sin(xf * 2.4 + t * 0.5) * xf;
+  return g.startY - rise + wave;
+}
+
+function drawBackground(t) {
+  ctx.clearRect(0, 0, W, H);
+  const g = geo();
+  const span = g.rightX - g.leftX;
+  const STEP = 0.012; // resolução das polilinhas
+
+  // ── trajetórias secundárias (azul, semitransparentes) ──
+  ctx.lineWidth = 1;
+  for (const l of lanes) {
+    ctx.beginPath();
+    for (let xf = 0; xf <= 1.0001; xf += STEP) {
+      const x = g.leftX + xf * span;
+      const y = laneY(l, xf, t);
+      if (xf === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = hexA(COLORS.blue, MONTE_CARLO.opacity);
+    ctx.stroke();
+  }
+
+  // ── linha de retorno principal (ciano + glow, progressiva) ──
+  if (!REDUCE) {
+    mainProgress = Math.min(1, mainProgress + 0.004);
+  } else {
+    mainProgress = 1;
+  }
+  ctx.save();
+  ctx.shadowColor = COLORS.cyan;
+  ctx.shadowBlur = 16;
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = hexA(COLORS.cyan, 0.95);
+  ctx.beginPath();
+  let tipX = g.leftX, tipY = g.startY;
+  for (let xf = 0; xf <= mainProgress + 1e-9; xf += STEP) {
+    const x = g.leftX + xf * span;
+    const y = mainY(xf, t);
+    if (xf === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    tipX = x; tipY = y;
+  }
+  ctx.stroke();
+
+  // ponto luminoso na ponta
+  ctx.beginPath();
+  ctx.fillStyle = COLORS.cyan;
+  ctx.shadowBlur = 24;
+  ctx.arc(tipX, tipY, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// "#RRGGBB" + alpha → "rgba(...)"
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SCRAMBLE — convergência letra a letra (esq→dir)
+   ════════════════════════════════════════════════════════════════ */
+function randChar() {
+  const c = SCRAMBLE.chars;
+  return c[(Math.random() * c.length) | 0];
+}
+
+// Tempo (ms desde o início da etapa) em que o caractere i trava.
+function lockTime(i) {
+  return i * SCRAMBLE.stagger + SCRAMBLE.perChar * SCRAMBLE.frameMs;
+}
+// Tempo total para a frase inteira convergir.
+function totalLock(text) {
+  return lockTime(text.length - 1);
+}
+
+// Renderiza a frase `text` no instante `elapsed` (ms desde o início da etapa).
+function renderScramble(text, elapsed) {
+  let html = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === " ") { html += " "; continue; } // espaços não embaralham
+    if (elapsed >= lockTime(i)) {
+      html += `<span class="lock">${escapeHTML(ch)}</span>`;   // convergido (branco)
+    } else {
+      html += `<span class="scram">${escapeHTML(randChar())}</span>`; // embaralhando (ciano)
+    }
+  }
+  logoEl.innerHTML = html;
+}
+
+function escapeHTML(s) {
+  return s.replace(/[&<>]/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Bloco final
+   ════════════════════════════════════════════════════════════════ */
+function goFinal() {
+  if (finished) return;             // idempotente (sequência natural ou skip)
+  finished = true;
+  mainProgress = 1;                 // completa a linha principal de imediato
+  const last = TEXTS[TEXTS.length - 1];
+  logoEl.classList.remove("final"); // reset caso reaproveitado
+  logoEl.textContent = last;        // texto limpo
+  logoEl.style.opacity = "1";
+  logoEl.classList.add("final");    // Space Grotesk + glow
+  outroEl.classList.add("show");    // revela subtítulo / simulando / botão
+  skipBtn.classList.add("hidden");  // já não faz sentido pular
+}
+
+// Pular a intro → salta direto para o estado final.
+function doSkip() { goFinal(); }
+skipBtn.addEventListener("click", doSkip);
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") doSkip(); });
+
+/* ════════════════════════════════════════════════════════════════
+   Loop principal
+   ════════════════════════════════════════════════════════════════ */
+function startAnimation() {
+  if (REDUCE) { startReduced(); return; }
+
+  let stage = 0;
+  let stageStart = performance.now();
+  let lastRender = 0;
+
+  function frame(now) {
+    const t = (now / 1000) * MONTE_CARLO.speed;
+    drawBackground(t);
+
+    if (!finished) {              // pode ter sido encerrado pelo skip
+      const elapsed = now - stageStart;
+      const text = TEXTS[stage];
+
+      // re-randomiza no ritmo de frameMs (sensação de iterações)
+      if (now - lastRender >= SCRAMBLE.frameMs) {
+        renderScramble(text, elapsed);
+        lastRender = now;
+      }
+
+      const isLast = stage === TEXTS.length - 1;
+      if (!isLast && elapsed >= STAGE_DURATIONS[stage]) {
+        stage++;
+        stageStart = now;
+      } else if (isLast && elapsed >= totalLock(text)) {
+        goFinal();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* Versão simplificada (prefers-reduced-motion):
+   troca de textos por fade, sem scramble agressivo nem partículas. */
+function startReduced() {
+  let stage = 0;
+  // fundo: desenha uma vez, estático (sem RAF de partículas)
+  drawBackground(0);
+
+  function show() {
+    if (finished) return;          // skip encerrou a sequência
+    const isLast = stage === TEXTS.length - 1;
+    logoEl.style.opacity = "0";
+    setTimeout(() => {
+      if (finished) return;
+      if (isLast) { goFinal(); return; }
+      logoEl.textContent = TEXTS[stage];
+      logoEl.style.opacity = "1";
+      setTimeout(() => { stage++; show(); }, STAGE_DURATIONS[stage]);
+    }, 350);
+  }
+  show();
+}
+
+/* ════════════════════════════════════════════════════════════════
+   onEnter() — ponto de integração com o boot do MARA
+   ════════════════════════════════════════════════════════════════ */
+function onEnter() {
+  console.log("[MARA] onEnter() — iniciar a ferramenta aqui.");
+  // Exemplo de integração:
+  // document.querySelector(".stage").style.display = "none";
+  // window.location.href = "/app";              // navegar para a aplicação
+  // ou: window.MARA?.boot();                    // chamar o bootstrap real
+}
+enterBtn.addEventListener("click", onEnter);
+
+/* ════════════════════════════════════════════════════════════════
+   Início: só após as fontes carregarem (evita flash de fonte trocada)
+   ════════════════════════════════════════════════════════════════ */
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(startAnimation);
+} else {
+  window.addEventListener("load", startAnimation);
+}
+</script>
+
+<!--
+════════════════════════════════════════════════════════════════════
+COMO AJUSTAR  (tudo fica no topo do <script>)
+════════════════════════════════════════════════════════════════════
+
+• TEXTOS DO ROTEIRO → const TEXTS
+    Edite/adicione frases na ordem desejada. A ÚLTIMA permanece como
+    logo final (recebe Space Grotesk + glow ciano). Se mudar a quantidade
+    de frases, ajuste STAGE_DURATIONS para ter (TEXTS.length - 1) valores.
+
+• TEMPOS POR ETAPA → const STAGE_DURATIONS (ms)
+    Um valor por frase, exceto a última. Garanta que cada valor seja
+    maior que o tempo de convergência do scramble daquela frase
+    (≈ (nº de chars - 1) * stagger + perChar * frameMs) + pausa de leitura.
+
+• CORES → const COLORS
+    bg (fundo), ink (texto/convergido), cyan (destaque/scramble),
+    blue (trajetórias). Há também variáveis CSS equivalentes em :root.
+
+• SCRAMBLE → const SCRAMBLE
+    frameMs  → velocidade do embaralhamento (menor = mais rápido)
+    perChar  → quantas iterações cada letra "testa" antes de travar
+    stagger  → defasagem entre letras (esq→dir); maior = onda mais lenta
+    chars    → pool de caracteres aleatórios
+
+• FUNDO MONTE CARLO → const MONTE_CARLO
+    drift    → TENDÊNCIA: >0 sobe (alta). Aumente para subir mais forte.
+    lines    → nº de trajetórias secundárias
+    opacity  → transparência das trajetórias
+    speed    → velocidade da oscilação em tempo real
+    noise    → intensidade do ruído/ondulação
+    amplitude→ amplitude da oscilação (fração da altura)
+
+• INTEGRAÇÃO → function onEnter()
+    O botão "Entrar" chama onEnter(). Substitua o placeholder pela
+    inicialização real (navegação, window.MARA.boot(), ocultar a splash,
+    etc.). Ver exemplos comentados dentro da função.
+════════════════════════════════════════════════════════════════════
+-->
+</body>
+</html>
