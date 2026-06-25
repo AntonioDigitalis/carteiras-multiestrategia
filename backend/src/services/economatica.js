@@ -1,5 +1,5 @@
 import { getDb } from '../db/database.js'
-import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'fs'
+import { createReadStream, existsSync, mkdirSync, openSync, readSync, closeSync, rmSync, statSync } from 'fs'
 import { createInterface } from 'readline'
 import { downloadToFile, registrarLog } from './external.js'
 
@@ -36,19 +36,41 @@ function ensureCacheDir() {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true })
 }
 
-// Cada linha: "ATIVO<FONTE>","YYYY-MM-DD",valor   (valor pode ser "-" ou notação científica)
-function parseLinha(line) {
-  const m = line.match(/^"([^"]*)","([^"]*)",(.*)$/)
-  if (!m) return null
-  const ativo = m[1]
-  const data = m[2]
-  let raw = m[3].trim()
-  if (raw.startsWith('"')) raw = raw.slice(1, -1)  // valor entre aspas (ex.: "-")
-  if (raw === '-' || raw === '') return { ativo, data, valor: null }
-  return { ativo, data, valor: parseFloat(raw) }
+// Split CSV simples: campos separados por vírgula, sem vírgulas internas;
+// remove aspas externas. Cobre tanto o formato de 3 colunas quanto os largos.
+function splitCsv(line) {
+  return line.split(',').map((f) => {
+    f = f.trim()
+    return f.startsWith('"') && f.endsWith('"') ? f.slice(1, -1) : f
+  })
+}
+
+// Descobre, pelo cabeçalho, a coluna do preço AJUSTADO por proventos (total return).
+// Feeds simples (etfs/indices/papeis_rf): 3 colunas, valor na 3ª ("...|ajust p/ prov|...").
+// Feeds largos (OHLCV): ações usam 'adj_close_price'; FIIs usam 'preco_fechamento_aj'.
+function acharColunaValor(headerFields) {
+  const norm = headerFields.map((h) => h.toLowerCase())
+  for (const nome of ['adj_close_price', 'preco_fechamento_aj']) {
+    const i = norm.indexOf(nome)
+    if (i >= 0) return i
+  }
+  if (headerFields.length === 3) return 2
+  throw new Error('cabeçalho sem coluna de preço ajustado reconhecida')
 }
 
 const stripSufixo = (ativo) => ativo.split('<')[0].trim()
+
+// Lê só os primeiros bytes do arquivo (evita carregar feeds de centenas de MB).
+function headBytes(path, n = 64) {
+  const fd = openSync(path, 'r')
+  try {
+    const b = Buffer.alloc(n)
+    const r = readSync(fd, b, 0, n, 0)
+    return b.slice(0, r).toString('utf8')
+  } finally {
+    closeSync(fd)
+  }
+}
 
 // Baixa o feed para arquivo temporário, seguindo o redirect 302 → S3 (presigned
 // de vida curta) imediatamente. Retenta porque a URL assinada pode expirar.
@@ -58,8 +80,7 @@ async function baixarFeed(url, destPath, feed) {
     try {
       await downloadToFile(url, destPath)
       // S3 devolve XML de erro com status 200/403 → detecta pelo início do arquivo
-      const head = readFileSync(destPath, { encoding: 'utf8', flag: 'r' }).slice(0, 64)
-      if (head.startsWith('<')) throw new Error('resposta inválida (presigned expirou?)')
+      if (headBytes(destPath).startsWith('<')) throw new Error('resposta inválida (presigned expirou?)')
       if (statSync(destPath).size < 64) throw new Error('arquivo vazio')
       return
     } catch (e) {
@@ -79,12 +100,21 @@ function processarArquivo(filePath, onRow, flush) {
     const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity })
     let batch = []
     let total = 0
-    let header = true
+    let valueCol = -1  // < 0 até o cabeçalho ser lido
     rl.on('line', (line) => {
-      if (header) { header = false; return }  // pula cabeçalho
-      const p = parseLinha(line)
-      if (!p || p.valor == null || p.data < DATA_MINIMA) return
-      const rows = onRow(p)
+      if (valueCol < 0) {  // primeira linha = cabeçalho
+        try { valueCol = acharColunaValor(splitCsv(line)) }
+        catch (e) { rl.close(); reject(e); return }
+        return
+      }
+      const fields = splitCsv(line)
+      const data = fields[1]
+      if (!data || data < DATA_MINIMA) return
+      const raw = fields[valueCol]
+      if (raw == null || raw === '-' || raw === '') return
+      const valor = parseFloat(raw)
+      if (isNaN(valor)) return
+      const rows = onRow({ ativo: fields[0], data, valor })
       if (rows && rows.length) {
         for (const r of rows) batch.push(r)
         if (batch.length >= BATCH) { flush(batch); total += batch.length; batch = [] }
