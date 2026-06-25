@@ -139,7 +139,7 @@ async function fetchJSON(url, opts = {}) {
   }
 }
 
-function registrarLog(fonte, ativo, valor, status, detalhes) {
+export function registrarLog(fonte, ativo, valor, status, detalhes) {
   try {
     const db = getDb()
     db.prepare(
@@ -297,7 +297,7 @@ function ensureB3CacheDir() {
 }
 
 // Download with HTTP→HTTPS redirect following
-function downloadToFile(url, destPath) {
+export function downloadToFile(url, destPath) {
   return new Promise((resolve, reject) => {
     function doGet(u, redirects = 0) {
       if (redirects > 5) return reject(new Error('Too many redirects'))

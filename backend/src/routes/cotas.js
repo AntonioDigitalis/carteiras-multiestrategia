@@ -4,6 +4,7 @@ import {
   fetchHistoricoBrapi, fetchCotaFundo,
   fetchCDIDiario, fetchCDIAcumuladoMensal, fetchIPCAMensal,
 } from '../services/external.js'
+import { sincronizarEconomatica } from '../services/economatica.js'
 
 const router = Router()
 
@@ -180,6 +181,17 @@ router.post('/sync-all', async (req, res) => {
   let sincronizados = 0
   const erros = []
 
+  // Fonte primária: Economatica (ações/FIIs/ETFs → cotas_cache; índices → dados_macro;
+  // papeis_rf → staging). O upsert é imutável, então o loop Yahoo/CVM abaixo só
+  // estende os dias além da cobertura Economatica, sem sobrescrevê-la.
+  let economatica = null
+  try {
+    economatica = await sincronizarEconomatica()
+    erros.push(...economatica.erros)
+  } catch (e) {
+    erros.push(`Economatica: ${e.message}`)
+  }
+
   // Sincronizar dados macro primeiro
   const hoje = new Date().toISOString().split('T')[0]
   const umAnoAtras = new Date(Date.now() - 365 * 24 * 3600000).toISOString().split('T')[0]
@@ -224,7 +236,7 @@ router.post('/sync-all', async (req, res) => {
   verificarRetornosAnomalos(db)
   verificarCotasTravadas(db)
 
-  res.json({ sincronizados, erros, total: produtos.length })
+  res.json({ sincronizados, erros, total: produtos.length, economatica })
 })
 
 function verificarRetornosAnomalos(db) {

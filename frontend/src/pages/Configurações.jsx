@@ -6,6 +6,16 @@ import Alert from '../components/ui/Alert'
 import { Download, Upload, Save, Plus, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 
+// Feeds Economatica (fonte primária). chave em configuracoes → rótulo na UI.
+const ECON_FEEDS = [
+  ['economatica_url_acoes',     'Ações'],
+  ['economatica_url_fiis',      'FIIs'],
+  ['economatica_url_etfs',      'ETFs'],
+  ['economatica_url_indices',   'Índices'],
+  ['economatica_url_papeis_rf', 'Papéis RF'],
+  ['economatica_url_fundos',    'Fundos'],
+]
+
 export default function Configurações() {
   const { perfis, loading, refetch: refetchPerfis } = usePerfis()
   const { carteiras, refetch: refetchCarteiras } = useCarteiras()
@@ -17,13 +27,20 @@ export default function Configurações() {
   const [importing, setImporting] = useState(false)
   const [alphaKey, setAlphaKey] = useState('')
   const [savingKey, setSavingKey] = useState(false)
+  const [econUrls, setEconUrls] = useState({})
+  const [savingEcon, setSavingEcon] = useState(false)
 
   useEffect(() => {
     if (perfis.length > 0) setEditPerfis([...perfis])
   }, [perfis])
 
   useEffect(() => {
-    api.getConfig().then((c) => { if (c.alpha_vantage_key) setAlphaKey(c.alpha_vantage_key) }).catch(() => {})
+    api.getConfig().then((c) => {
+      if (c.alpha_vantage_key) setAlphaKey(c.alpha_vantage_key)
+      const urls = {}
+      for (const [k, label] of ECON_FEEDS) if (c[k]) urls[k] = c[k]  // '***' quando configurada
+      setEconUrls(urls)
+    }).catch(() => {})
   }, [])
 
   async function salvarAlphaKey() {
@@ -35,6 +52,29 @@ export default function Configurações() {
       setMsg({ type: 'error', text: e.message })
     } finally {
       setSavingKey(false)
+    }
+  }
+
+  async function salvarEconUrls() {
+    // Só envia as URLs que o usuário realmente digitou ('***' = mascarada, não mexe)
+    const payload = {}
+    for (const [k] of ECON_FEEDS) {
+      const v = (econUrls[k] || '').trim()
+      if (v && v !== '***') payload[k] = v
+    }
+    if (Object.keys(payload).length === 0) {
+      setMsg({ type: 'error', text: 'Cole ao menos uma URL nova para salvar.' })
+      return
+    }
+    setSavingEcon(true)
+    try {
+      await api.saveConfig(payload)
+      setMsg({ type: 'success', text: 'URLs Economatica salvas!' })
+      setEconUrls((prev) => ({ ...prev, ...Object.fromEntries(Object.keys(payload).map((k) => [k, '***'])) }))
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message })
+    } finally {
+      setSavingEcon(false)
     }
   }
 
@@ -388,6 +428,34 @@ export default function Configurações() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Feeds Economatica (fonte primária) */}
+      <div className="card space-y-4">
+        <div className="text-sm font-semibold text-slate-300">Feeds Economatica (fonte primária)</div>
+        <p className="text-xs text-slate-500">
+          URLs de download da API Economatica. Atualizadas automaticamente no botão de sincronização
+          (uma vez por dia por feed). Tratadas como sensíveis — após salvas aparecem como{' '}
+          <span className="font-mono">***</span>; cole uma URL nova para substituir.
+        </p>
+        <div className="space-y-2">
+          {ECON_FEEDS.map(([k, label]) => (
+            <div key={k} className="flex items-center gap-2">
+              <div className="text-xs text-slate-400 w-24 shrink-0">{label}</div>
+              <input
+                type="password"
+                value={econUrls[k] || ''}
+                onChange={(e) => setEconUrls((prev) => ({ ...prev, [k]: e.target.value }))}
+                placeholder="Cole a URL do feed aqui"
+                className="input text-xs flex-1 font-mono"
+              />
+              {econUrls[k] === '***' && <span className="text-[10px] text-accent-green shrink-0">ok</span>}
+            </div>
+          ))}
+        </div>
+        <button onClick={salvarEconUrls} disabled={savingEcon} className="btn-primary text-xs px-3">
+          {savingEcon ? 'Salvando...' : 'Salvar URLs'}
+        </button>
       </div>
 
       {/* Informações do sistema */}
