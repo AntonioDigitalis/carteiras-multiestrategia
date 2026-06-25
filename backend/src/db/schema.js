@@ -155,6 +155,14 @@ CREATE TABLE IF NOT EXISTS configuracoes (
   valor TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Staging cru do feed papeis_RF da Economatica (sem produto correspondente ainda)
+CREATE TABLE IF NOT EXISTS economatica_papeis_rf (
+  ativo TEXT NOT NULL,
+  data  TEXT NOT NULL,
+  valor REAL NOT NULL,
+  PRIMARY KEY (ativo, data)
+);
 `
 
 export const SEED = `
