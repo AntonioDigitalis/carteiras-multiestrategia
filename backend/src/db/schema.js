@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS estados_portfolio (
   mes TEXT NOT NULL,             -- formato YYYY-MM
   data_inicio TEXT NOT NULL,     -- formato YYYY-MM-DD
   data_fim TEXT,                 -- NULL = vigente até o final do mês
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  notas TEXT
 );
 
 -- Produtos dentro de cada estado
@@ -66,7 +67,8 @@ CREATE TABLE IF NOT EXISTS produtos (
   data_emissao TEXT,
   data_vencimento TEXT,
   isento_ir INTEGER NOT NULL DEFAULT 0, -- 1 = isento IR (LCI/LCA/CRI/CRA/Deb. incentivada)
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  duration_manual REAL
 );
 
 -- Cache de cotas / preços históricos

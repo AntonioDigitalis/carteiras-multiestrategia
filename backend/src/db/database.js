@@ -152,6 +152,21 @@ function runMigrations(db) {
     markRun('rename_asset_classes')
   }
 
+  // Migração: adicionar notas em estados_portfolio
+  const colsEstados = db.pragma('table_info(estados_portfolio)').map((c) => c.name)
+  if (!colsEstados.includes('notas')) {
+    db.exec('ALTER TABLE estados_portfolio ADD COLUMN notas TEXT')
+    console.log('[DB] Migração: adicionado notas em estados_portfolio.')
+  }
+  markRun('add_notas_estados_portfolio')
+
+  // Migração: adicionar duration_manual em produtos
+  if (!colsProdutos.includes('duration_manual')) {
+    db.exec('ALTER TABLE produtos ADD COLUMN duration_manual REAL')
+    console.log('[DB] Migração: adicionado duration_manual em produtos.')
+  }
+  markRun('add_duration_manual_produtos')
+
   if (!hasRun('add_performance_indexes')) {
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_dados_macro_serie_data ON dados_macro(serie, data);
