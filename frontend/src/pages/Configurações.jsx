@@ -29,6 +29,8 @@ export default function Configurações() {
   const [savingKey, setSavingKey] = useState(false)
   const [econUrls, setEconUrls] = useState({})
   const [savingEcon, setSavingEcon] = useState(false)
+  const [econCreds, setEconCreds] = useState({ customer_id: '', api_key: '', api_secret: '' })
+  const [savingEconCreds, setSavingEconCreds] = useState(false)
 
   useEffect(() => {
     if (perfis.length > 0) setEditPerfis([...perfis])
@@ -37,6 +39,11 @@ export default function Configurações() {
   useEffect(() => {
     api.getConfig().then((c) => {
       if (c.alpha_vantage_key) setAlphaKey(c.alpha_vantage_key)
+      setEconCreds({
+        customer_id: c.economatica_customer_id || '',
+        api_key: c.economatica_api_key || '',
+        api_secret: c.economatica_api_secret || '',
+      })
       const urls = {}
       for (const [k, label] of ECON_FEEDS) if (c[k]) urls[k] = c[k]  // '***' quando configurada
       setEconUrls(urls)
@@ -52,6 +59,35 @@ export default function Configurações() {
       setMsg({ type: 'error', text: e.message })
     } finally {
       setSavingKey(false)
+    }
+  }
+
+  async function salvarEconCreds() {
+    // Só reenvia campos mascarados como '***' se o usuário não tiver mexido neles
+    const payload = {}
+    for (const k of ['customer_id', 'api_key', 'api_secret']) {
+      const v = (econCreds[k] || '').trim()
+      if (v && v !== '***') payload[`economatica_${k}`] = v
+    }
+    if (Object.keys(payload).length === 0) {
+      setMsg({ type: 'error', text: 'Preencha ao menos um campo novo para salvar.' })
+      return
+    }
+    setSavingEconCreds(true)
+    try {
+      await api.saveConfig(payload)
+      setMsg({ type: 'success', text: 'Credenciais de teste Economatica salvas!' })
+      setEconCreds((prev) => {
+        const next = { ...prev }
+        for (const k of ['customer_id', 'api_key', 'api_secret']) {
+          if (payload[`economatica_${k}`] != null) next[k] = '***'
+        }
+        return next
+      })
+    } catch (e) {
+      setMsg({ type: 'error', text: e.message })
+    } finally {
+      setSavingEconCreds(false)
     }
   }
 
@@ -456,6 +492,36 @@ export default function Configurações() {
         <button onClick={salvarEconUrls} disabled={savingEcon} className="btn-primary text-xs px-3">
           {savingEcon ? 'Salvando...' : 'Salvar URLs'}
         </button>
+
+        <div className="pt-2 border-t border-slate-800">
+          <div className="text-xs text-slate-400 font-medium mb-1">Economatica News API (teste)</div>
+          <p className="text-xs text-slate-500 mb-2">
+            Credenciais da News API cedida para teste (autenticação HMAC — api_key + api_secret).
+            Guardadas aqui apenas para uso experimental, ainda não conectadas à sincronização.
+          </p>
+          <div className="space-y-2">
+            {[
+              ['customer_id', 'Customer ID'],
+              ['api_key', 'API Key'],
+              ['api_secret', 'API Secret'],
+            ].map(([k, label]) => (
+              <div key={k} className="flex items-center gap-2">
+                <div className="text-xs text-slate-400 w-20 shrink-0">{label}</div>
+                <input
+                  type="password"
+                  value={econCreds[k] || ''}
+                  onChange={(e) => setEconCreds((prev) => ({ ...prev, [k]: e.target.value }))}
+                  placeholder={`Cole o ${label} aqui`}
+                  className="input text-xs flex-1 font-mono"
+                />
+                {econCreds[k] === '***' && <span className="text-[10px] text-accent-green shrink-0">ok</span>}
+              </div>
+            ))}
+          </div>
+          <button onClick={salvarEconCreds} disabled={savingEconCreds} className="btn-primary text-xs px-3 mt-2">
+            {savingEconCreds ? 'Salvando...' : 'Salvar credenciais'}
+          </button>
+        </div>
       </div>
 
       {/* Informações do sistema */}
