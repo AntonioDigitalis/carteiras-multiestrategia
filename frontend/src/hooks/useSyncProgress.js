@@ -23,7 +23,8 @@ export function useSyncProgress() {
         setStatus(s)
         if (!s.running) pararPolling()
       } catch {
-        pararPolling()
+        // Erro transitório de rede — mantém o polling e tenta de novo no
+        // próximo tick, em vez de parar e deixar o status preso em "running"
       }
     }, 1000)
   }, [pararPolling])
