@@ -15,7 +15,11 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }))
-app.use(express.json({ limit: '50mb' }))
+// O export/import de configuração inclui cotas_cache inteiro (anos de cotas
+// diárias × produtos duplicados por estado) — já passou de 300MB em uso real,
+// bem acima do limite anterior de 50mb. App local mono-usuário, sem exposição
+// à internet, então um limite alto aqui não é risco de DoS.
+app.use(express.json({ limit: '2gb' }))
 
 // Inicializar DB antes das rotas
 getDb()
