@@ -25,12 +25,20 @@ router.get('/', (req, res) => {
 // PUT /api/config
 router.put('/', (req, res) => {
   const db = getDb()
+  for (const [k, v] of Object.entries(req.body)) {
+    if (v !== null && typeof v !== 'string') {
+      return res.status(400).json({ error: `Valor de '${k}' deve ser texto` })
+    }
+  }
   const stmt = db.prepare(
     `INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
      ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor, updated_at = datetime('now')`
   )
   db.transaction(() => {
     for (const [k, v] of Object.entries(req.body)) {
+      // '***' é o placeholder mascarado devolvido pelo GET — nunca deve
+      // sobrescrever a credencial real (ex: cliente reenvia o form sem editar)
+      if (v === '***') continue
       stmt.run(k, v)
     }
   })()
