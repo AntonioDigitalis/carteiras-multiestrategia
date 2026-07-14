@@ -640,10 +640,12 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
   ).all(dataInicio.slice(0, 7) + '-01', dataFim.slice(0, 7) + '-01')
   const ipcaByMes = new Map(ipcaRows.map((r) => [r.data.slice(0, 7), r.valor / 100]))
 
-  // Alocações macro
+  // Alocações macro. Sem limite inferior: getAloc precisa conseguir achar a
+  // alocação vigente mesmo quando o último mês configurado é anterior a
+  // dataInicio (ex: alocação parada em 2026-03, período selecionado é julho).
   const alocRows = db.prepare(
-    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes >= ? AND mes <= ? ORDER BY mes`
-  ).all(carteira.perfil_id, dataInicio.slice(0, 7), dataFim.slice(0, 7))
+    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes <= ? ORDER BY mes`
+  ).all(carteira.perfil_id, dataFim.slice(0, 7))
   const alocByMes = new Map(alocRows.map((a) => [a.mes, a]))
 
   function getAloc(mes) {
