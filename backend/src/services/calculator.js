@@ -36,6 +36,71 @@ const SPREADS_FALLBACK_AA = {
   fundos_listados:{ base: 'cdi',  spread: 0.02 },
 }
 
+// Benchmark adaptativo: IBOV para RV Brasil, IFIX para FIIs, Passivo para multi-estratégia
+const BENCHMARK_POR_CLASSE = {
+  rv_brasil:      { serie: 'IBOV_MENSAL',   label: 'IBOV' },
+  fundos_listados:{ serie: 'IFIX_MENSAL',   label: 'IFIX' },
+  rv_global:      { serie: 'ACWI_MENSAL',   label: 'ACWI' },
+  inflacao:       { serie: 'IMAB11_MENSAL', label: 'IMA-B' },
+  prefixado:      { serie: 'IRFM11_MENSAL', label: 'IRF-M' },
+  multimercado:   { serie: 'IHFA_MENSAL',   label: 'IHFA' },
+  pos_fixado:     { serie: 'CDI_MENSAL',    label: 'CDI' },
+}
+
+// Contraparte diária real (Economatica/BCB) de cada série mensal de benchmark —
+// usada para dar volatilidade real ao gráfico da carteira passiva em vez de
+// espalhar o retorno mensal uniformemente pelos dias úteis.
+const SERIE_DIARIA_POR_MENSAL = {
+  IBOV_MENSAL:   'IBOV_DIARIO',
+  IFIX_MENSAL:   'IFIX_DIARIO',
+  IMAB11_MENSAL: 'IMAB_DIARIO',
+  IRFM11_MENSAL: 'IRFM_DIARIO',
+  IHFA_MENSAL:   'IHFA_DIARIO',
+  CDI_MENSAL:    'CDI_DIARIO',
+}
+
+// Determina se a carteira tem um único benchmark "limpo" (override explícito
+// ou classe dominante >50% da alocação média) — usado tanto para beta/up-down
+// capture (calcularMetricas) quanto para a série diária real (calcularPassiva).
+function getSingleBenchmarkSerie(carteira, alocacoes) {
+  if (carteira.benchmark_override) {
+    return { serieMensal: carteira.benchmark_override, label: carteira.benchmark_override.replace('_MENSAL', '') }
+  }
+  const classes = Object.keys(LABELS_CLASSE)
+  const pesoMedioClasse = {}
+  for (const cls of classes)
+    pesoMedioClasse[cls] = alocacoes.reduce((s, a) => s + (a[cls] || 0), 0) / Math.max(alocacoes.length, 1)
+  const classeDOM = classes.find((cls) => pesoMedioClasse[cls] > 50)
+  if (classeDOM && BENCHMARK_POR_CLASSE[classeDOM]) {
+    return { serieMensal: BENCHMARK_POR_CLASSE[classeDOM].serie, label: BENCHMARK_POR_CLASSE[classeDOM].label }
+  }
+  return null
+}
+
+// Compõe o retorno acumulado real dia a dia de uma série de níveis (ex:
+// IBOV_DIARIO), amostrado nas datas de referência (calendário CDI_DIARIO —
+// datas fora do calendário do índice carregam o último nível conhecido).
+function serieDiariaPassivoReal(db, serieDiario, datasReferencia, mesInicioStr, mesFimStr) {
+  const rows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie = ? AND data >= ? AND data <= ? ORDER BY data`
+  ).all(serieDiario, mesInicioStr + '-01', mesFimStr + '-31')
+  if (rows.length < 2) return null
+
+  let acumulado = 1
+  let ultimoNivel = null
+  let idx = 0
+  const resultado = new Map()
+  for (const data of datasReferencia) {
+    while (idx < rows.length && rows[idx].data <= data) {
+      if (ultimoNivel != null) acumulado *= rows[idx].valor / ultimoNivel
+      ultimoNivel = rows[idx].valor
+      idx++
+    }
+    resultado.set(data, acumulado - 1)
+  }
+  return resultado
+}
+
 function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
   const mesData = mes + '-01'
 
@@ -925,33 +990,17 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const cvar_99 = varIdx99 >= 0 ? -(sortedRet.slice(0, varIdx99 + 1).reduce((s, r) => s + r, 0) / (varIdx99 + 1)) : null
 
   // ── Benchmark adaptativo: IBOV para RV Brasil, IFIX para FIIs, Passivo para multi-estratégia ──
-  const BENCHMARK_POR_CLASSE = {
-    rv_brasil:      { serie: 'IBOV_MENSAL',   label: 'IBOV' },
-    fundos_listados:{ serie: 'IFIX_MENSAL',   label: 'IFIX' },
-    rv_global:      { serie: 'ACWI_MENSAL',   label: 'ACWI' },
-    inflacao:       { serie: 'IMAB11_MENSAL', label: 'IMA-B' },
-    prefixado:      { serie: 'IRFM11_MENSAL', label: 'IRF-M' },
-    multimercado:   { serie: 'IHFA_MENSAL',   label: 'IHFA' },
-    pos_fixado:     { serie: 'CDI_MENSAL',    label: 'CDI' },
-  }
   const CLASSES_BETA = Object.keys(LABELS_CLASSE)
-
-  // Peso médio de cada classe no período para identificar classe dominante
-  const pesoMedioClasse = {}
-  for (const cls of CLASSES_BETA)
-    pesoMedioClasse[cls] = alocacoes.reduce((s, a) => s + (a[cls] || 0), 0) / Math.max(alocacoes.length, 1)
-  const classeDOM = CLASSES_BETA.find(cls => pesoMedioClasse[cls] > 50)
+  const benchmarkUnico = getSingleBenchmarkSerie(carteira, alocacoes)
 
   let benchmarkByMes = new Map()
   let benchmark_label = 'Passivo'
 
-  if (classeDOM && BENCHMARK_POR_CLASSE[classeDOM]) {
-    // Carteira concentrada: usa o índice da classe dominante
-    const { serie, label } = BENCHMARK_POR_CLASSE[classeDOM]
-    benchmark_label = label
+  if (benchmarkUnico) {
+    benchmark_label = benchmarkUnico.label
     const bmkRows = db.prepare(
       `SELECT data, valor FROM dados_macro WHERE serie=? AND data >= ? AND data <= ? ORDER BY data`
-    ).all(serie, mesInicioStr + '-01', mesFimStr + '-01')
+    ).all(benchmarkUnico.serieMensal, mesInicioStr + '-01', mesFimStr + '-01')
     benchmarkByMes = new Map(bmkRows.map(r => [r.data.slice(0, 7), r.valor / 100]))
   } else {
     // Multi-estratégia: benchmark passivo composto (retorno ponderado dos índices por classe)
@@ -1137,12 +1186,20 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
     ).get(mes + '-01')
     const ipcaMensal = ipcaRow ? ipcaRow.valor / 100 : 0.004
 
-    let retPassivo = 0
-    for (const cls of CLASSES) {
-      const pesoClasse = (aloc[cls] || 0) / 100
-      if (pesoClasse === 0) continue
-      const retClasse = retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db)
-      retPassivo += retClasse * pesoClasse
+    // Override da carteira substitui o composto ponderado por classe por um
+    // único índice (ex: Top Dividendos usa IDIV em vez do IBOV de rv_brasil)
+    let retPassivo
+    if (carteira.benchmark_override) {
+      const row = db.prepare(`SELECT valor FROM dados_macro WHERE serie=? AND data=?`).get(carteira.benchmark_override, mes + '-01')
+      retPassivo = row ? row.valor / 100 : cdiMensal
+    } else {
+      retPassivo = 0
+      for (const cls of CLASSES) {
+        const pesoClasse = (aloc[cls] || 0) / 100
+        if (pesoClasse === 0) continue
+        const retClasse = retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db)
+        retPassivo += retClasse * pesoClasse
+      }
     }
 
     const retAtivo = retAtivosMap[mes] ?? null
@@ -1202,37 +1259,54 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
     rolling_alpha.push({ data: janela[janela.length - 1].mes, alpha_12m: acumAtivJan / acumPassJan - 1 })
   }
 
-  // Série diária: passivo distribuído uniformemente pelos dias úteis do mês;
-  // ativo usa a série diária real de calcularMetricas.
+  // Série diária: usa a volatilidade real do benchmark quando a carteira tem
+  // um único índice (override ou classe dominante) e ele tem contraparte
+  // diária real. Sem isso, cai de volta a espalhar o retorno mensal
+  // uniformemente pelos dias úteis do mês. Ativo usa a série diária real de
+  // calcularMetricas em ambos os casos.
   let serieDiaria = null
   const ativoSerieDiaria = ativoMetricas.serie_retorno_diaria
   if (ativoSerieDiaria?.length > 1) {
     const cdiDiarios = db.prepare(
       `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
     ).all(inicioEfetivo, dataFim || new Date().toISOString().split('T')[0])
-
-    // Conta dias úteis por mês
-    const diasPorMes = new Map()
-    for (const { data } of cdiDiarios) {
-      const m = data.slice(0, 7)
-      diasPorMes.set(m, (diasPorMes.get(m) || 0) + 1)
-    }
-
-    const passivoMensal = new Map(retornosMensais.map((r) => [r.mes, r.passivo]))
+    const datasReferencia = cdiDiarios.map((r) => r.data)
     const ativoByData = new Map(ativoSerieDiaria.map((p) => [p.data, p.retorno_acumulado]))
 
-    let acumPassDiario = 1
-    serieDiaria = cdiDiarios.map(({ data }) => {
-      const mes = data.slice(0, 7)
-      const retMes = passivoMensal.get(mes) ?? 0
-      const n = diasPorMes.get(mes) || 21
-      acumPassDiario *= Math.pow(1 + retMes, 1 / n)
-      return {
+    const benchmarkUnico = getSingleBenchmarkSerie(carteira, alocacoes)
+    const serieDiarioReal = benchmarkUnico && SERIE_DIARIA_POR_MENSAL[benchmarkUnico.serieMensal]
+    const passivoReal = serieDiarioReal
+      ? serieDiariaPassivoReal(db, serieDiarioReal, datasReferencia, mesInicioStr, mesFimStr)
+      : null
+
+    if (passivoReal) {
+      serieDiaria = datasReferencia.map((data) => ({
         data,
-        passivo_acumulado: acumPassDiario - 1,
+        passivo_acumulado: passivoReal.get(data) ?? null,
         ativo_acumulado: ativoByData.get(data) ?? null,
+      }))
+    } else {
+      // Fallback: sem série diária real do benchmark (multi-estratégia
+      // composta, ou índice só disponível mensal, ex: IDIV)
+      const diasPorMes = new Map()
+      for (const data of datasReferencia) {
+        const m = data.slice(0, 7)
+        diasPorMes.set(m, (diasPorMes.get(m) || 0) + 1)
       }
-    })
+      const passivoMensal = new Map(retornosMensais.map((r) => [r.mes, r.passivo]))
+      let acumPassDiario = 1
+      serieDiaria = datasReferencia.map((data) => {
+        const mes = data.slice(0, 7)
+        const retMes = passivoMensal.get(mes) ?? 0
+        const n = diasPorMes.get(mes) || 21
+        acumPassDiario *= Math.pow(1 + retMes, 1 / n)
+        return {
+          data,
+          passivo_acumulado: acumPassDiario - 1,
+          ativo_acumulado: ativoByData.get(data) ?? null,
+        }
+      })
+    }
   }
 
   return {
