@@ -9,6 +9,7 @@ const SENSITIVE_CONFIG_KEYS = new Set([
   'anbima_client_id', 'anbima_client_secret',
   'economatica_url_acoes', 'economatica_url_fiis', 'economatica_url_etfs',
   'economatica_url_indices', 'economatica_url_papeis_rf', 'economatica_url_fundos',
+  'economatica_api_key', 'economatica_api_secret', 'economatica_customer_id',
 ])
 
 // GET /api/config
@@ -78,9 +79,12 @@ router.post('/importar', (req, res) => {
   }
 
   try {
-    // Ativa FK enforcement para o bloco de import — FKs inválidas lançam exceção
-    // em vez de criar registros órfãos silenciosamente (volta a OFF no finally)
-    db.pragma('foreign_keys = ON')
+    // Desliga FK enforcement durante o import: INSERT OR REPLACE faz DELETE+INSERT
+    // por baixo dos panos, e com FK ligado isso dispara ON DELETE CASCADE nos
+    // filhos (produtos de um estado, cotas de um produto) — no modo merge isso
+    // apaga dados locais que não estavam no dump importado. Volta a ON no finally
+    // (é o padrão da conexão, setado em getDb()).
+    db.pragma('foreign_keys = OFF')
     db.transaction(() => {
       if (modo === 'substituir') {
         // Limpar tabelas (exceto perfis e carteiras base)
@@ -139,18 +143,18 @@ router.post('/importar', (req, res) => {
       // Inserir estados
       for (const e of data.estados_portfolio ?? []) {
         db.prepare(`
-          INSERT OR REPLACE INTO estados_portfolio (id, carteira_id, mes, data_inicio, data_fim, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(e.id, e.carteira_id, e.mes, e.data_inicio, e.data_fim, e.created_at)
+          INSERT OR REPLACE INTO estados_portfolio (id, carteira_id, mes, data_inicio, data_fim, created_at, notas)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(e.id, e.carteira_id, e.mes, e.data_inicio, e.data_fim, e.created_at, e.notas ?? null)
       }
 
       // Inserir produtos
       for (const p of data.produtos ?? []) {
         db.prepare(`
           INSERT OR REPLACE INTO produtos
-            (id, estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(p.id, p.estado_id, p.tipo, p.classe, p.nome, p.identificador, p.peso, p.indexador, p.tipo_cdi, p.taxa, p.data_emissao, p.data_vencimento, p.isento_ir ?? 0, p.created_at)
+            (id, estado_id, tipo, classe, nome, identificador, peso, indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir, created_at, duration_manual)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(p.id, p.estado_id, p.tipo, p.classe, p.nome, p.identificador, p.peso, p.indexador, p.tipo_cdi, p.taxa, p.data_emissao, p.data_vencimento, p.isento_ir ?? 0, p.created_at, p.duration_manual ?? null)
       }
 
       // Inserir cotas (merge ignora duplicatas)
@@ -169,6 +173,31 @@ router.post('/importar', (req, res) => {
         `).run(d.serie, d.data, d.valor, d.fonte, d.created_at)
       }
 
+      // Inserir alertas de auditoria (preserva status revisado/ignorar do usuário)
+      for (const a of data.alertas_auditoria ?? []) {
+        db.prepare(`
+          INSERT OR REPLACE INTO alertas_auditoria
+            (id, tipo, categoria, titulo, descricao, ativo, produto_id, data, valor_bruto, valor_usado, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(a.id, a.tipo, a.categoria, a.titulo, a.descricao, a.ativo, a.produto_id, a.data, a.valor_bruto, a.valor_usado, a.status, a.created_at, a.updated_at)
+      }
+
+      // Inserir retornos mensais (cache)
+      for (const r of data.retornos_mensais ?? []) {
+        db.prepare(`
+          INSERT OR REPLACE INTO retornos_mensais (id, carteira_id, mes, retorno, retorno_cdi, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(r.id, r.carteira_id, r.mes, r.retorno, r.retorno_cdi, r.created_at, r.updated_at)
+      }
+
+      // Inserir log de captação (histórico, ignora duplicatas)
+      for (const l of data.log_captacao ?? []) {
+        db.prepare(`
+          INSERT OR IGNORE INTO log_captacao (id, timestamp, fonte, ativo, valor, status, detalhes)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(l.id, l.timestamp, l.fonte, l.ativo, l.valor, l.status, l.detalhes)
+      }
+
       // Configurações
       for (const c of data.configuracoes ?? []) {
         db.prepare(`
@@ -183,7 +212,7 @@ router.post('/importar', (req, res) => {
     console.error('[importar]', e)
     res.status(500).json({ error: e.message })
   } finally {
-    db.pragma('foreign_keys = OFF')
+    db.pragma('foreign_keys = ON')
   }
 })
 
