@@ -67,6 +67,11 @@ router.post('/ativos', async (req, res) => {
       })
 
     const syncErros = {}
+    // Produtos temporários (peso=0) só ancoram a inserção das cotas sincronizadas
+    // agora — removidos depois que o otimizador ler os dados, senão ficam
+    // permanentes no estado real de uma carteira aleatória (poluindo Gestão de
+    // Dados, auditoria e sync-all para sempre).
+    const produtosTemp = []
 
     if (ativosSemDados.length > 0 && estadoRef) {
       await Promise.allSettled(ativosSemDados.map(async (ativo) => {
@@ -76,6 +81,7 @@ router.post('/ativos', async (req, res) => {
           produtoId = db.prepare(
             `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso) VALUES (?, ?, ?, ?, ?, 0)`
           ).run(estadoRef.id, ativo.nome || ativo.identificador, ativo.identificador, ativo.tipo, classe).lastInsertRowid
+          produtosTemp.push(produtoId)
           const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 25s')), 25000))
           const { rows, insertMany } = await Promise.race([fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje), timeout])
           insertMany(produtoId, rows)
@@ -99,6 +105,9 @@ router.post('/ativos', async (req, res) => {
       classe, ativos,
       start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100, restricoes
     )
+
+    for (const id of produtosTemp) db.prepare('DELETE FROM produtos WHERE id = ?').run(id)
+
     if (data?.ativos && Object.keys(syncErros).length > 0) {
       data.ativos = data.ativos.map((a) =>
         syncErros[a.identificador] ? { ...a, sync_erro: syncErros[a.identificador] } : a

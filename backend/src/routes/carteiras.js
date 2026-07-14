@@ -19,10 +19,11 @@ function validateDateRange(start, end, res) {
 }
 
 // GET /api/carteiras/mercado?mes=YYYY-MM  (deve ficar ANTES de /:id)
-router.get('/mercado', (req, res) => {
+router.get('/mercado', async (req, res) => {
   try {
     const mes = req.query.mes || new Date().toISOString().slice(0, 7)
     if (!/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'mes deve ser YYYY-MM' })
+    await garantirDadosMacro(mes + '-01', mes + '-28')
     const data = calcularPainelMercado(mes)
     res.json(data)
   } catch (e) {
@@ -44,17 +45,6 @@ router.get('/', (req, res) => {
 })
 
 // GET /api/carteiras/:id
-router.get('/mercado', async (req, res) => {
-  try {
-    const mes = req.query.mes || new Date().toISOString().slice(0, 7)
-    await garantirDadosMacro(mes + '-01', mes + '-28')
-    const painel = calcularPainelMercado(mes)
-    res.json(painel)
-  } catch (e) {
-    console.error('[mercado]', e)
-    res.status(500).json({ error: e.message })
-  }
-})
 
 router.get('/:id', (req, res) => {
   const db = getDb()
@@ -415,10 +405,28 @@ router.delete('/:id/mes/:mes', (req, res) => {
 router.post('/:id/estados', (req, res) => {
   const db = getDb()
   const { mes, data_inicio, data_fim } = req.body
-  const result = db.prepare(
-    `INSERT INTO estados_portfolio (carteira_id, mes, data_inicio, data_fim)
-     VALUES (?, ?, ?, ?)`
-  ).run(req.params.id, mes, data_inicio, data_fim || null)
+  if (!/^\d{4}-\d{2}$/.test(mes || '')) return res.status(400).json({ error: 'mes deve ser YYYY-MM' })
+  if (!isValidDate(data_inicio)) return res.status(400).json({ error: 'data_inicio deve ser YYYY-MM-DD' })
+  if (data_fim && !isValidDate(data_fim)) return res.status(400).json({ error: 'data_fim deve ser YYYY-MM-DD' })
+
+  const diaAntes = new Date(data_inicio + 'T12:00:00')
+  diaAntes.setDate(diaAntes.getDate() - 1)
+  const fimAnterior = diaAntes.toISOString().split('T')[0]
+
+  const result = db.transaction(() => {
+    // Fecha qualquer estado aberto anterior da mesma carteira — sem isso,
+    // calcularRetornoMes compõe as janelas sobrepostas (o estado aberto vai
+    // até o fim do mês, dobrando o retorno do período em comum com o novo)
+    db.prepare(
+      `UPDATE estados_portfolio SET data_fim = ?
+       WHERE carteira_id = ? AND data_fim IS NULL AND data_inicio < ?`
+    ).run(fimAnterior, req.params.id, data_inicio)
+
+    return db.prepare(
+      `INSERT INTO estados_portfolio (carteira_id, mes, data_inicio, data_fim)
+       VALUES (?, ?, ?, ?)`
+    ).run(req.params.id, mes, data_inicio, data_fim || null)
+  })()
 
   res.json({
     id: result.lastInsertRowid,
@@ -579,6 +587,11 @@ router.post('/:id/otimizar-classe', async (req, res) => {
       return n === 0
     })
 
+    // Produtos temporários (peso=0) só ancoram a inserção das cotas sincronizadas
+    // agora — removidos depois que o otimizador ler os dados, senão ficam
+    // permanentes no último estado real da carteira (poluindo Gestão de Dados,
+    // auditoria e sync-all para sempre).
+    const produtosTemp = []
     if (ativosSemDados.length > 0 && estadoRef) {
       await Promise.allSettled(ativosSemDados.map(async (ativo) => {
         _syncInProgress.add(ativo.identificador)
@@ -587,6 +600,7 @@ router.post('/:id/otimizar-classe', async (req, res) => {
           produtoId = db.prepare(
             `INSERT INTO produtos (estado_id, nome, identificador, tipo, classe, peso) VALUES (?, ?, ?, ?, ?, 0)`
           ).run(estadoRef.id, ativo.nome || ativo.identificador, ativo.identificador, ativo.tipo, classe).lastInsertRowid
+          produtosTemp.push(produtoId)
 
           const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 25s')), 25000))
           const { rows, insertMany } = await Promise.race([fetchHistoricoBrapi(ativo.identificador, dataInicio, hoje), timeout])
@@ -609,6 +623,9 @@ router.post('/:id/otimizar-classe', async (req, res) => {
       Number(req.params.id), classe, ativos,
       start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100, restricoes
     )
+
+    for (const id of produtosTemp) db.prepare('DELETE FROM produtos WHERE id = ?').run(id)
+
     res.json(data)
   } catch (e) {
     console.error('[otimizar-classe]', e)
