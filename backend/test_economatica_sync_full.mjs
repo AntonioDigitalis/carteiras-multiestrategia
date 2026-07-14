@@ -30,11 +30,15 @@ async function chamar(path) {
 
 const FAMILIAS = ['equities', 'fii', 'etf', 'bdr']
 
+// Dados 'economatica' (feed URL, fonte primária) são imutáveis — nunca sobrescrever
+// com o teste da News API, mesma regra do insertMany de external.js.
 const stmt = db.prepare(`
   INSERT INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
   VALUES (?, ?, ?, NULL, 'economatica_news_api')
   ON CONFLICT(produto_id, data) DO UPDATE SET
-    valor = excluded.valor, valor_ajustado = NULL, fonte = 'economatica_news_api'
+    valor          = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.valor ELSE excluded.valor END,
+    valor_ajustado = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.valor_ajustado ELSE NULL END,
+    fonte          = CASE WHEN cotas_cache.fonte = 'economatica' THEN cotas_cache.fonte ELSE excluded.fonte END
 `)
 const flush = db.transaction((rows) => { for (const r of rows) stmt.run(r.pid, r.data, r.valor) })
 
