@@ -178,6 +178,14 @@ function runMigrations(db) {
   }
   markRun('add_duration_manual_produtos')
 
+  // Migração: adicionar benchmark_override em carteiras
+  const colsCarteiras = db.pragma('table_info(carteiras)').map((c) => c.name)
+  if (!colsCarteiras.includes('benchmark_override')) {
+    db.exec('ALTER TABLE carteiras ADD COLUMN benchmark_override TEXT')
+    console.log('[DB] Migração: adicionado benchmark_override em carteiras.')
+  }
+  markRun('add_benchmark_override_carteiras')
+
   if (!hasRun('add_performance_indexes')) {
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_dados_macro_serie_data ON dados_macro(serie, data);

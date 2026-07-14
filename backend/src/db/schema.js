@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS carteiras (
   tipo TEXT NOT NULL CHECK(tipo IN ('A', 'B')),
   nome TEXT NOT NULL,
   descricao TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')),
+  -- Substitui o benchmark passivo padrão (ponderado por classe) por um único
+  -- índice fixo (ex: 'IDIV_MENSAL') quando duas carteiras do mesmo perfil
+  -- precisam de benchmarks diferentes apesar de compartilhar a mesma alocação macro
+  benchmark_override TEXT
 );
 
 -- Alocação macro compartilhada por perfil (ambas carteiras do perfil)
