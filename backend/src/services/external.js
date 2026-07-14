@@ -797,15 +797,28 @@ function toDataBR(iso) {
   return iso.split('-').reverse().join('/')
 }
 
+// Nº de meses de calendário entre mesInicio e mesFim (strings 'YYYY-MM-01'), inclusive
+function contarMesesEsperados(mesInicio, mesFim) {
+  const [yIni, mIni] = mesInicio.slice(0, 7).split('-').map(Number)
+  const [yFim, mFim] = mesFim.slice(0, 7).split('-').map(Number)
+  return (yFim - yIni) * 12 + (mFim - mIni) + 1
+}
+
 export async function garantirDadosMacro(dataInicio, dataFim) {
   const db = getDb()
   const mesInicio = dataInicio.slice(0, 7) + '-01'
   const mesFim = dataFim.slice(0, 7) + '-01'
+  const mesesEsperados = contarMesesEsperados(mesInicio, mesFim)
+
+  // Compara contra o nº de meses esperado no intervalo — checar só "existe
+  // alguma linha" (count > 0) deixava faltar backfill: se o período pedido já
+  // tinha ALGUM dado recente, meses mais antigos dentro do mesmo intervalo
+  // nunca eram buscados.
   const existentes = db.prepare(
     `SELECT COUNT(*) as c FROM dados_macro WHERE serie = 'CDI_MENSAL' AND data >= ? AND data <= ?`
   ).get(mesInicio, mesFim)
 
-  if (existentes.c === 0) {
+  if (existentes.c < mesesEsperados) {
     try {
       await fetchCDIDiario(toDataBR(dataInicio), toDataBR(dataFim))
       await fetchCDIAcumuladoMensal(toDataBR(dataInicio), toDataBR(dataFim))
@@ -819,7 +832,7 @@ export async function garantirDadosMacro(dataInicio, dataFim) {
   const existentesIdx = db.prepare(
     `SELECT COUNT(*) as c FROM dados_macro WHERE serie = 'IBOV_MENSAL' AND data >= ? AND data <= ?`
   ).get(mesInicio, mesFim)
-  if (existentesIdx.c === 0) {
+  if (existentesIdx.c < mesesEsperados) {
     try {
       await fetchIndicesMercado(dataInicio, dataFim)
     } catch (e) {
@@ -832,7 +845,7 @@ export async function garantirDadosMacro(dataInicio, dataFim) {
     const existentesIHFA = db.prepare(
       `SELECT COUNT(*) as c FROM dados_macro WHERE serie = 'IHFA_MENSAL' AND data >= ? AND data <= ?`
     ).get(mesInicio, mesFim)
-    if (existentesIHFA.c === 0) {
+    if (existentesIHFA.c < mesesEsperados) {
       try {
         await fetchIHFAMensal(dataInicio, dataFim)
       } catch (e) {
@@ -852,9 +865,44 @@ const INDICES_CONFIG = [
   { serie: 'IBOV_MENSAL',   ticker: '^BVSP' },         // Ibovespa
   { serie: 'IRX_MENSAL',    ticker: '^IRX' },           // T-bill 13 sem (% a.a.) — custo hedge
   { serie: 'DEBB11_MENSAL', ticker: 'DEBB11.SA' },    // IDA-DI proxy (desde jun/2022)
+  { serie: 'IFIX_MENSAL',   ticker: 'XFIX11.SA' },    // fallback se Economatica não tiver: ETF proxy (IT Now IFIX), dados desde ~2020-11
+  { serie: 'IDIV_MENSAL',   ticker: 'DIVO11.SA' },    // IDIV não vem do feed Economatica — ETF proxy (IT Now IDIV), dados desde ~2017
 ]
-// IFIX não está no Yahoo Finance — buscado separadamente via Alpha Vantage
-const IFIX_AV_SYMBOL = 'IFIX.SAO'
+
+// Feed 'indices' da Economatica (economatica.js) já grava essas séries diárias
+// reais — preferidas sobre o proxy ETF do Yahoo (sem tracking error/taxa de adm.)
+const ECONOMATICA_DIARIO_POR_MENSAL = {
+  IBOV_MENSAL:   'IBOV_DIARIO',
+  IFIX_MENSAL:   'IFIX_DIARIO',
+  IMAB11_MENSAL: 'IMAB_DIARIO',
+  IRFM11_MENSAL: 'IRFM_DIARIO',
+}
+
+// Deriva retorno mensal (% ) a partir do último nível diário de cada mês.
+function derivarMensalDeDiario(db, serieDiario, serieMensal, mesInicioCmp, mesFimCmp) {
+  const rows = db.prepare(`SELECT data, valor FROM dados_macro WHERE serie = ? ORDER BY data`).all(serieDiario)
+  if (rows.length < 2) return 0
+
+  const ultimoPorMes = new Map() // 'YYYY-MM' -> valor (rows em ordem crescente, último grava por cima)
+  for (const r of rows) ultimoPorMes.set(r.data.slice(0, 7), r.valor)
+  const meses = [...ultimoPorMes.keys()].sort()
+
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO dados_macro (serie, data, valor, fonte) VALUES (?, ?, ?, 'economatica')`
+  )
+  let total = 0
+  db.transaction(() => {
+    for (let i = 1; i < meses.length; i++) {
+      const mesData = meses[i] + '-01'
+      if (mesData < mesInicioCmp || mesData > mesFimCmp) continue
+      const prev = ultimoPorMes.get(meses[i - 1])
+      const curr = ultimoPorMes.get(meses[i])
+      stmt.run(serieMensal, mesData, (curr / prev - 1) * 100)
+      total++
+    }
+  })()
+  return total
+}
 
 export async function fetchIndicesMercado(dataInicio, dataFim) {
   const db = getDb()
@@ -873,6 +921,17 @@ export async function fetchIndicesMercado(dataInicio, dataFim) {
 
   let total = 0
   for (const { serie, ticker } of INDICES_CONFIG) {
+    // Prefere a série diária real da Economatica quando cobre o início do período
+    const serieDiario = ECONOMATICA_DIARIO_POR_MENSAL[serie]
+    if (serieDiario) {
+      const cobertura = db.prepare(
+        `SELECT count(*) as c FROM dados_macro WHERE serie = ? AND data <= ?`
+      ).get(serieDiario, mesInicioCmp)
+      if (cobertura.c > 0) {
+        total += derivarMensalDeDiario(db, serieDiario, serie, mesInicioCmp, mesFimCmp)
+        continue
+      }
+    }
     try {
       if (serie === 'IRX_MENSAL') {
         // ^IRX mensal tem nulls recentes — usa diário e pega último valor de cada mês
@@ -912,35 +971,6 @@ export async function fetchIndicesMercado(dataInicio, dataFim) {
       console.warn(`[indices] Falha em ${ticker}:`, e.message)
     }
   }
-  // IFIX via Alpha Vantage (Yahoo Finance não tem)
-  const avKey = getAlphaVantageKey()
-  if (avKey) {
-    try {
-      const avUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${IFIX_AV_SYMBOL}&apikey=${avKey}`
-      const avRes = await fetch(avUrl, { headers: CVM_HEADERS })
-      const avData = await avRes.json()
-      const ts = avData['Monthly Adjusted Time Series']
-      if (ts) {
-        const entries = Object.entries(ts)
-          .map(([date, v]) => ({ date, close: parseFloat(v['5. adjusted close'] ?? v['4. close']) }))
-          .filter((e) => !isNaN(e.close))
-          .sort((a, b) => a.date.localeCompare(b.date))
-
-        db.transaction(() => {
-          for (let i = 1; i < entries.length; i++) {
-            const mesData = entries[i].date.slice(0, 7) + '-01'
-            if (mesData < mesInicioCmp || mesData > mesFimCmp) continue
-            const retorno = (entries[i].close / entries[i - 1].close - 1) * 100
-            stmt.run('IFIX_MENSAL', mesData, retorno)
-            total++
-          }
-        })()
-      }
-    } catch (e) {
-      console.warn('[indices] Falha em IFIX via Alpha Vantage:', e.message)
-    }
-  }
-
   return total
 }
 
