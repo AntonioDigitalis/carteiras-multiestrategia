@@ -191,19 +191,22 @@ router.post('/sync-all', (req, res) => {
   }
 
   const db = getDb()
-  const produtos = db.prepare(
-    `SELECT p.* FROM produtos p WHERE p.tipo IN ('fundo', 'acao') AND p.identificador IS NOT NULL`
+  // Deduplica por identificador — um ticker/CNPJ aparece uma vez por
+  // estado/mês em que foi usado; sincronizar por linha repetia a mesma
+  // chamada de rede dezenas de vezes para o mesmo ativo.
+  const identificadores = db.prepare(
+    `SELECT DISTINCT identificador, tipo FROM produtos WHERE tipo IN ('fundo', 'acao') AND identificador IS NOT NULL`
   ).all()
 
-  syncStatus = { running: true, total: produtos.length, processed: 0, sincronizados: 0, erros: [], economatica: null }
-  res.json({ started: true, total: produtos.length })
+  syncStatus = { running: true, total: identificadores.length, processed: 0, sincronizados: 0, erros: [], economatica: null }
+  res.json({ started: true, total: identificadores.length })
 
-  executarSyncAll(db, produtos)
+  executarSyncAll(db, identificadores)
     .catch((e) => { syncStatus.erros.push(`Erro fatal: ${e.message}`) })
     .finally(() => { syncStatus.running = false })
 })
 
-async function executarSyncAll(db, produtos) {
+async function executarSyncAll(db, identificadores) {
   // Fonte primária: Economatica (ações/FIIs/ETFs → cotas_cache; índices → dados_macro;
   // papeis_rf → staging). O upsert é imutável, então o loop Yahoo/CVM abaixo só
   // estende os dias além da cobertura Economatica, sem sobrescrevê-la.
@@ -228,21 +231,32 @@ async function executarSyncAll(db, produtos) {
     syncStatus.erros.push(`Dados macro: ${e.message}`)
   }
 
-  for (const p of produtos) {
+  // Upsert de cotas de fundo — mesma política do sync individual (POST
+  // /:produtoId/sync): re-sync sobrescreve cotas corrigidas/revisadas pela
+  // CVM, em vez de ignorá-las silenciosamente.
+  const stmtFundo = db.prepare(`
+    INSERT INTO cotas_cache (produto_id, data, valor, fonte)
+    VALUES (?, ?, ?, 'CVM')
+    ON CONFLICT(produto_id, data) DO UPDATE SET valor = excluded.valor, fonte = excluded.fonte
+  `)
+
+  for (const { identificador, tipo } of identificadores) {
     try {
-      if (p.tipo === 'acao') {
-        const { rows, insertMany } = await fetchHistoricoBrapi(p.identificador, umAnoAtras, hoje)
-        insertMany(p.id, rows)
+      const produtoIds = db.prepare(
+        `SELECT id FROM produtos WHERE identificador = ? AND tipo = ?`
+      ).all(identificador, tipo).map((r) => r.id)
+
+      if (tipo === 'acao') {
+        const { rows, insertMany } = await fetchHistoricoBrapi(identificador, umAnoAtras, hoje)
+        for (const pid of produtoIds) insertMany(pid, rows)
         syncStatus.sincronizados++
-      } else if (p.tipo === 'fundo') {
-        const cotas = await fetchCotaFundo(p.identificador, umAnoAtras, hoje)
-        const stmt = db.prepare(`
-          INSERT OR IGNORE INTO cotas_cache (produto_id, data, valor, fonte)
-          VALUES (?, ?, ?, 'CVM')
-        `)
+      } else if (tipo === 'fundo') {
+        const cotas = await fetchCotaFundo(identificador, umAnoAtras, hoje)
         db.transaction(() => {
-          for (const c of cotas) {
-            if (c.data && c.valor) stmt.run(p.id, c.data, c.valor)
+          for (const pid of produtoIds) {
+            for (const c of cotas) {
+              if (c.data && c.valor) stmtFundo.run(pid, c.data, c.valor)
+            }
           }
         })()
         syncStatus.sincronizados++
@@ -250,7 +264,7 @@ async function executarSyncAll(db, produtos) {
       // Pequeno delay para não sobrecarregar APIs
       await new Promise((r) => setTimeout(r, 200))
     } catch (e) {
-      syncStatus.erros.push(`${p.nome}: ${e.message}`)
+      syncStatus.erros.push(`${identificador}: ${e.message}`)
     }
     syncStatus.processed++
   }
