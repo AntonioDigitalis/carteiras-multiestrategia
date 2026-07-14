@@ -67,6 +67,7 @@ export const api = {
   getCotasCache: (produtoId) => request(`/cotas/${produtoId}`),
   syncCotas: (produtoId) => request(`/cotas/${produtoId}/sync`, { method: 'POST' }),
   syncTodas: () => request('/cotas/sync-all', { method: 'POST' }),
+  syncStatus: () => request('/cotas/sync-status'),
 
   // Métricas
   getMetricas: (carteiraId, params) => {

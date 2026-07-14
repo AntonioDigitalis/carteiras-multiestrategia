@@ -8,6 +8,18 @@ import { sincronizarEconomatica } from '../services/economatica.js'
 
 const router = Router()
 
+// Estado do sync-all em andamento (processo único do backend, uma sincronização por vez)
+let syncStatus = { running: false, total: 0, processed: 0, sincronizados: 0, erros: [], economatica: null }
+
+// GET /api/cotas/sync-status — precisa vir antes de /:produtoId, senão é capturada por ela
+router.get('/sync-status', (req, res) => {
+  const { running, total, processed, sincronizados, erros, economatica } = syncStatus
+  res.json({
+    running, total, processed, sincronizados, erros, economatica,
+    percent: total > 0 ? Math.round((processed / total) * 100) : 0,
+  })
+})
+
 // GET /api/cotas/:produtoId
 router.get('/:produtoId', (req, res) => {
   const db = getDb()
@@ -171,25 +183,35 @@ router.post('/:produtoId/sync', async (req, res) => {
   }
 })
 
-// POST /api/cotas/sync-all
-router.post('/sync-all', async (req, res) => {
+// POST /api/cotas/sync-all — dispara em background e responde de imediato;
+// acompanhe o progresso via GET /sync-status.
+router.post('/sync-all', (req, res) => {
+  if (syncStatus.running) {
+    return res.status(409).json({ error: 'Sincronização já em andamento' })
+  }
+
   const db = getDb()
   const produtos = db.prepare(
     `SELECT p.* FROM produtos p WHERE p.tipo IN ('fundo', 'acao') AND p.identificador IS NOT NULL`
   ).all()
 
-  let sincronizados = 0
-  const erros = []
+  syncStatus = { running: true, total: produtos.length, processed: 0, sincronizados: 0, erros: [], economatica: null }
+  res.json({ started: true, total: produtos.length })
 
+  executarSyncAll(db, produtos)
+    .catch((e) => { syncStatus.erros.push(`Erro fatal: ${e.message}`) })
+    .finally(() => { syncStatus.running = false })
+})
+
+async function executarSyncAll(db, produtos) {
   // Fonte primária: Economatica (ações/FIIs/ETFs → cotas_cache; índices → dados_macro;
   // papeis_rf → staging). O upsert é imutável, então o loop Yahoo/CVM abaixo só
   // estende os dias além da cobertura Economatica, sem sobrescrevê-la.
-  let economatica = null
   try {
-    economatica = await sincronizarEconomatica()
-    erros.push(...economatica.erros)
+    syncStatus.economatica = await sincronizarEconomatica()
+    syncStatus.erros.push(...syncStatus.economatica.erros)
   } catch (e) {
-    erros.push(`Economatica: ${e.message}`)
+    syncStatus.erros.push(`Economatica: ${e.message}`)
   }
 
   // Sincronizar dados macro primeiro
@@ -203,7 +225,7 @@ router.post('/sync-all', async (req, res) => {
     await fetchCDIAcumuladoMensal(dataInicioBR, dataFimBR)
     await fetchIPCAMensal(dataInicioBR, dataFimBR)
   } catch (e) {
-    erros.push(`Dados macro: ${e.message}`)
+    syncStatus.erros.push(`Dados macro: ${e.message}`)
   }
 
   for (const p of produtos) {
@@ -211,7 +233,7 @@ router.post('/sync-all', async (req, res) => {
       if (p.tipo === 'acao') {
         const { rows, insertMany } = await fetchHistoricoBrapi(p.identificador, umAnoAtras, hoje)
         insertMany(p.id, rows)
-        sincronizados++
+        syncStatus.sincronizados++
       } else if (p.tipo === 'fundo') {
         const cotas = await fetchCotaFundo(p.identificador, umAnoAtras, hoje)
         const stmt = db.prepare(`
@@ -223,21 +245,24 @@ router.post('/sync-all', async (req, res) => {
             if (c.data && c.valor) stmt.run(p.id, c.data, c.valor)
           }
         })()
-        sincronizados++
+        syncStatus.sincronizados++
       }
       // Pequeno delay para não sobrecarregar APIs
       await new Promise((r) => setTimeout(r, 200))
     } catch (e) {
-      erros.push(`${p.nome}: ${e.message}`)
+      syncStatus.erros.push(`${p.nome}: ${e.message}`)
     }
+    syncStatus.processed++
   }
 
   // Verificar retornos anômalos e cotas travadas
-  verificarRetornosAnomalos(db)
-  verificarCotasTravadas(db)
-
-  res.json({ sincronizados, erros, total: produtos.length, economatica })
-})
+  try {
+    verificarRetornosAnomalos(db)
+    verificarCotasTravadas(db)
+  } catch (e) {
+    syncStatus.erros.push(`Verificação pós-sync: ${e.message}`)
+  }
+}
 
 function verificarRetornosAnomalos(db) {
   const hoje = new Date().toISOString().split('T')[0]

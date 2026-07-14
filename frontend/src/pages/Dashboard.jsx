@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useCarteiras } from '../hooks/useCarteiras'
+import { useSyncProgress } from '../hooks/useSyncProgress'
 import PeriodSelector, { resolvePeriod } from '../components/ui/PeriodSelector'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { clsx } from 'clsx'
@@ -13,19 +14,27 @@ const defaultPeriod = { preset: '12M', ...resolvePeriod('12M') }
 export default function Dashboard() {
   const { carteiras, loading: loadingCarteiras } = useCarteiras()
   const [period, setPeriod] = useState(defaultPeriod)
-  const [syncing, setSyncing] = useState(false)
+  const { status, start } = useSyncProgress()
   const [syncMsg, setSyncMsg] = useState(null)
+  const prevRunning = useRef(false)
+
+  useEffect(() => {
+    if (prevRunning.current && !status.running) {
+      setSyncMsg(
+        status.erros.length > 0
+          ? `Concluído com ${status.erros.length} erro(s). ${status.sincronizados} ativos atualizados.`
+          : `Dados atualizados: ${status.sincronizados} ativos`
+      )
+    }
+    prevRunning.current = status.running
+  }, [status.running, status.erros.length, status.sincronizados])
 
   async function syncAll() {
-    setSyncing(true)
     setSyncMsg(null)
     try {
-      const r = await api.syncTodas()
-      setSyncMsg(`Dados atualizados: ${r.sincronizados} ativos`)
+      await start()
     } catch (e) {
       setSyncMsg(`Erro: ${e.message}`)
-    } finally {
-      setSyncing(false)
     }
   }
 
@@ -41,11 +50,21 @@ export default function Dashboard() {
           <PeriodSelector value={period} onChange={setPeriod} />
           <button
             onClick={syncAll}
-            disabled={syncing}
-            className="btn-secondary flex items-center gap-2"
+            disabled={status.running}
+            className="btn-secondary relative overflow-hidden flex items-center gap-2"
           >
-            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Sincronizando...' : 'Atualizar Dados'}
+            {status.running && (
+              <span
+                className="absolute inset-y-0 left-0 bg-accent-blue/20 transition-all duration-300"
+                style={{ width: `${status.percent}%` }}
+              />
+            )}
+            <span className="relative flex items-center gap-2">
+              <RefreshCw size={13} className={status.running ? 'animate-spin' : ''} />
+              {status.running
+                ? `Sincronizando... ${status.percent}% (${status.processed}/${status.total})`
+                : 'Atualizar Dados'}
+            </span>
           </button>
         </div>
       </div>

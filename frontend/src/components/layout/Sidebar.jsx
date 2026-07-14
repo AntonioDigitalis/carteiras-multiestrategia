@@ -13,8 +13,9 @@ import {
   Check,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useCarteiras } from '../../hooks/useCarteiras'
+import { useSyncProgress } from '../../hooks/useSyncProgress'
 import { clsx } from 'clsx'
 
 const navItems = [
@@ -29,19 +30,29 @@ const navItems = [
 export default function Sidebar() {
   const { carteiras, loading } = useCarteiras()
   const location = useLocation()
-  const [syncState, setSyncState] = useState('idle') // idle | syncing | ok | error
+  const { status, start } = useSyncProgress()
+  const [resultado, setResultado] = useState(null) // null | 'ok' | 'error' — transiente pós-sync
+  const prevRunning = useRef(false)
+
+  useEffect(() => {
+    if (prevRunning.current && !status.running) {
+      setResultado(status.erros.length > 0 ? 'error' : 'ok')
+      const t = setTimeout(() => setResultado(null), 2000)
+      prevRunning.current = status.running
+      return () => clearTimeout(t)
+    }
+    prevRunning.current = status.running
+  }, [status.running, status.erros.length])
 
   async function handleSync(e) {
     e.preventDefault()
-    if (syncState === 'syncing') return
-    setSyncState('syncing')
+    if (status.running) return
+    setResultado(null)
     try {
-      const res = await fetch('/api/cotas/sync-all', { method: 'POST' })
-      setSyncState(res.ok ? 'ok' : 'error')
+      await start()
     } catch {
-      setSyncState('error')
-    } finally {
-      setTimeout(() => setSyncState('idle'), 2000)
+      setResultado('error')
+      setTimeout(() => setResultado(null), 2000)
     }
   }
 
@@ -84,20 +95,26 @@ export default function Sidebar() {
               {idx === 0 && (
                 <button
                   onClick={handleSync}
-                  disabled={syncState === 'syncing'}
-                  title="Sincronizar dados"
+                  disabled={status.running}
+                  title={status.running ? `Sincronizando... ${status.percent}%` : 'Sincronizar dados'}
                   className={clsx(
-                    'flex-shrink-0 p-1.5 rounded-md transition-colors',
-                    syncState === 'ok'    && 'text-emerald-400',
-                    syncState === 'error' && 'text-red-400',
-                    syncState === 'idle' || syncState === 'syncing'
-                      ? 'text-slate-600 hover:text-slate-300 hover:bg-bg-tertiary'
-                      : ''
+                    'relative flex-shrink-0 p-1.5 rounded-md transition-colors overflow-hidden',
+                    resultado === 'ok'    && 'text-emerald-400',
+                    resultado === 'error' && 'text-red-400',
+                    !resultado && 'text-slate-600 hover:text-slate-300 hover:bg-bg-tertiary'
                   )}
                 >
-                  {syncState === 'ok'    ? <Check size={13} /> :
-                   syncState === 'error' ? <X size={13} /> :
-                   <RefreshCw size={13} className={syncState === 'syncing' ? 'animate-spin' : ''} />}
+                  {status.running && (
+                    <span
+                      className="absolute inset-y-0 left-0 bg-accent-blue/25 transition-all duration-300"
+                      style={{ width: `${status.percent}%` }}
+                    />
+                  )}
+                  <span className="relative">
+                    {resultado === 'ok'    ? <Check size={13} /> :
+                     resultado === 'error' ? <X size={13} /> :
+                     <RefreshCw size={13} className={status.running ? 'animate-spin' : ''} />}
+                  </span>
                 </button>
               )}
             </div>
