@@ -166,10 +166,10 @@ export async function fetchCDIDiario(dataInicio, dataFim) {
       for (const r of rows) {
         const d = r.data.split('/').reverse().join('-')  // DD/MM/YYYY → YYYY-MM-DD
         stmt.run(d, parseFloat(r.valor))
-        registrarLog('BCB_SGS_12', 'CDI_DIARIO', r.valor, 'ok', null)
       }
     })
     insertMany(data)
+    registrarLog('BCB_SGS_12', 'CDI_DIARIO', data.length, 'ok', null)
     return data.length
   } catch (e) {
     registrarLog('BCB_SGS_12', 'CDI_DIARIO', null, 'erro', e.message)
@@ -433,6 +433,14 @@ export async function fetchHistoricoB3(ticker, dataInicio, dataFim) {
   return result
 }
 
+// Grava no cache e descarta a entrada mais antiga (ordem de inserção) se
+// passar do limite — evita crescimento sem limite em caches de arquivos
+// grandes (COTAHIST anual, CVM mensal) mantidos pela vida do processo.
+function setComLimite(map, key, value, max) {
+  map.set(key, value)
+  if (map.size > max) map.delete(map.keys().next().value)
+}
+
 // In-memory cache: year → Map<ticker_date, price>
 const _cotahistCache = new Map()
 
@@ -475,7 +483,7 @@ async function fetchCotahistAnual(year) {
     byTicker.get(tkr).push({ date: dt, close: preco, adjustedClose: preco })
   }
 
-  _cotahistCache.set(year, byTicker)
+  setComLimite(_cotahistCache, year, byTicker, 3)
   return byTicker
 }
 
@@ -692,7 +700,7 @@ async function fetchCsvCVM(anoMes) {
   fs.rmSync(tmpDir, { recursive: true, force: true })
   fs.rmSync(tmpZip, { force: true })
 
-  _cvmCache.set(anoMes, porCnpj)
+  setComLimite(_cvmCache, anoMes, porCnpj, 12)
   return porCnpj
 }
 
