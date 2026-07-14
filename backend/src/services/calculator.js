@@ -788,10 +788,12 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
       for (const [classe, classeProds] of Object.entries(classeMap)) {
         const pesoClasse = (aloc[classe] ?? 0) / 100
         if (!pesoClasse) continue
-        const pesoTotal = classeProds.reduce((s, p) => s + (p.peso || 0), 0) || 1
-        let retClasse = 0
 
-        for (const p of classeProds) {
+        // Dois passos: primeiro coleta os retornos do dia, depois renormaliza
+        // pelo peso só dos produtos com dado hoje. Evita diluir a classe
+        // quando um produto sem cotação no dia mantinha seu peso no
+        // denominador (subestimava o retorno do dia silenciosamente).
+        const retsPorProd = classeProds.map((p) => {
           let retP = null
 
           if (p.tipo === 'rf_curva') {
@@ -826,11 +828,17 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
               }
             }
           } else if (p.tipo === 'carteira' && p.identificador) {
-            const retDiario = subRetDiario.get(`${p.identificador}_${dia.slice(0, 7)}`)
-            if (retDiario != null) retP = retDiario
+            const retDiarioSub = subRetDiario.get(`${p.identificador}_${dia.slice(0, 7)}`)
+            if (retDiarioSub != null) retP = retDiarioSub
           }
 
-          if (retP !== null) retClasse += retP * ((p.peso || 0) / pesoTotal)
+          return { p, retP }
+        })
+
+        const pesoComDados = retsPorProd.reduce((s, { p, retP }) => retP != null ? s + (p.peso || 0) : s, 0)
+        let retClasse = 0
+        for (const { p, retP } of retsPorProd) {
+          if (retP !== null) retClasse += retP * ((p.peso || 0) / (pesoComDados || 1))
         }
 
         retDiario += retClasse * pesoClasse
@@ -2594,7 +2602,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
 
   for (const aloc of alocacoes) {
     const estados = db.prepare(
-      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ?`
+      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
     ).all(carteiraId, aloc.mes)
 
     const [ano, m] = aloc.mes.split('-').map(Number)
@@ -2620,6 +2628,12 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     const duMes = mesParcial ? contarDiasUteis(primeiroDiaMes, ultimoDiaMes, db) : 0
     const duJanela = mesParcial ? contarDiasUteis(inicioMes, fimMes, db) : 0
 
+    // Um produto que persiste em 2 estados do mesmo mês (rebalance no meio do
+    // mês) só pode ter o benchmark do mês aplicado UMA vez — benchmarkMes já
+    // é o valor do mês inteiro, não decomposto por sub-período (diferente de
+    // retorno_acum, que compõe corretamente por sub-período abaixo).
+    const benchmarkAplicado = new Set()
+
     for (const cls of Object.keys(CLASSES)) {
       const pesoClasse = (aloc[cls] || 0) / 100
       if (pesoClasse === 0) continue
@@ -2639,66 +2653,79 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
         }
       }
 
-      // Coletar todos os produtos desta classe neste mês
-      const todosProdutos = []
+      // Composição sequencial por sub-período de cada estado dentro do mês —
+      // mesmo padrão de calcularRetornoMes. Evita computar o retorno do mês
+      // inteiro duas vezes quando um produto persiste em 2 estados (rebalance
+      // no meio do mês): cada estado contribui só com sua própria janela.
+      let retornoClasseAcum = 1
       for (const est of estados) {
+        const estIni = est.data_inicio > inicioMes ? est.data_inicio : inicioMes
+        const estFim = est.data_fim && est.data_fim < fimMes ? est.data_fim : fimMes
+        if (estIni > estFim) continue
+
         const prods = db.prepare(
           `SELECT * FROM produtos WHERE estado_id = ? AND classe = ?`
         ).all(est.id, cls)
-        todosProdutos.push(...prods)
-      }
+        if (prods.length === 0) continue
 
-      const retsPorProdAtrib = todosProdutos.map(p => ({ p, ret: calcularRetornoProduto(p, inicioMes, fimMes) }))
-      const pesoComDadosAtrib = retsPorProdAtrib.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
-      let retornoClasse = 0
+        const retsPorProdAtrib = prods.map(p => ({ p, ret: calcularRetornoProduto(p, estIni, estFim) }))
+        const pesoComDadosAtrib = retsPorProdAtrib.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
+        let retornoSubPeriodo = 0
 
-      for (const { p, ret } of retsPorProdAtrib) {
-        const pesoNorm = (p.peso || 0) / (pesoComDadosAtrib || 1)
-        if (ret != null) retornoClasse += ret * pesoNorm
+        for (const { p, ret } of retsPorProdAtrib) {
+          const pesoNorm = (p.peso || 0) / (pesoComDadosAtrib || 1)
+          if (ret != null) retornoSubPeriodo += ret * pesoNorm
 
-        // Acumular por ativo — normaliza tickers renomeados para o nome canônico
-        if (!p.identificador) continue  // produto sem identificador não pode ser rastreado individualmente
-        const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
-        const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
-        const ativoKey = `${canonicalId}__${cls}`
-        if (!acumAtivo[ativoKey]) {
-          acumAtivo[ativoKey] = {
-            nome: p.nome || canonicalId,
-            identificador: canonicalId,
-            tipo: p.tipo,
-            classe: cls,
-            retorno_acum: 1,
-            benchmark_acum: 1,
-            contribuicao_total: 0,
-            peso_portfolio_medio: 0,
-            peso_classe_medio: 0,
-            n: 0,
-            sem_dados: false,
-            indexador: p.indexador,
-            tipo_cdi: p.tipo_cdi,
-            taxa: p.taxa,
-            data_vencimento: p.data_vencimento,
-            duration_manual: p.duration_manual,
+          // Acumular por ativo — normaliza tickers renomeados para o nome canônico
+          if (!p.identificador) continue  // produto sem identificador não pode ser rastreado individualmente
+          const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
+          const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
+          const ativoKey = `${canonicalId}__${cls}`
+          if (!acumAtivo[ativoKey]) {
+            acumAtivo[ativoKey] = {
+              nome: p.nome || canonicalId,
+              identificador: canonicalId,
+              tipo: p.tipo,
+              classe: cls,
+              retorno_acum: 1,
+              benchmark_acum: 1,
+              contribuicao_total: 0,
+              peso_portfolio_medio: 0,
+              peso_classe_medio: 0,
+              n: 0,
+              sem_dados: false,
+              indexador: p.indexador,
+              tipo_cdi: p.tipo_cdi,
+              taxa: p.taxa,
+              data_vencimento: p.data_vencimento,
+              duration_manual: p.duration_manual,
+            }
           }
+          const a = acumAtivo[ativoKey]
+          // Atualiza campos de duration com os valores mais recentes do ativo
+          a.indexador = p.indexador
+          a.tipo_cdi = p.tipo_cdi
+          a.taxa = p.taxa
+          a.data_vencimento = p.data_vencimento
+          a.duration_manual = p.duration_manual
+          if (ret != null) {
+            a.retorno_acum *= (1 + ret)
+            a.contribuicao_total += ret * pesoNorm * pesoClasse
+          } else {
+            a.sem_dados = true
+          }
+          if (!benchmarkAplicado.has(ativoKey)) {
+            a.benchmark_acum *= (1 + benchmarkMes)
+            benchmarkAplicado.add(ativoKey)
+          }
+          a.peso_portfolio_medio += pesoNorm * pesoClasse
+          a.peso_classe_medio += pesoNorm
+          a.n++
         }
-        const a = acumAtivo[ativoKey]
-        // Atualiza campos de duration com os valores mais recentes do ativo
-        a.indexador = p.indexador
-        a.tipo_cdi = p.tipo_cdi
-        a.taxa = p.taxa
-        a.data_vencimento = p.data_vencimento
-        a.duration_manual = p.duration_manual
-        if (ret != null) {
-          a.retorno_acum *= (1 + ret)
-          a.contribuicao_total += ret * pesoNorm * pesoClasse
-        } else {
-          a.sem_dados = true
-        }
-        a.benchmark_acum *= (1 + benchmarkMes)
-        a.peso_portfolio_medio += pesoNorm * pesoClasse
-        a.peso_classe_medio += pesoNorm
-        a.n++
+
+        retornoClasseAcum *= (1 + retornoSubPeriodo)
       }
+      const retornoClasse = retornoClasseAcum - 1
 
       acumClasse[cls].retorno *= (1 + retornoClasse)
       acumClasse[cls].benchmark *= (1 + benchmarkMes)
