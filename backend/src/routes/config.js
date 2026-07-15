@@ -61,10 +61,13 @@ router.get('/exportar', (req, res) => {
     retornos_mensais: db.prepare('SELECT * FROM retornos_mensais').all(),
     alertas_auditoria: db.prepare('SELECT * FROM alertas_auditoria').all(),
     log_captacao: db.prepare('SELECT * FROM log_captacao ORDER BY timestamp DESC LIMIT 1000').all(),
-    // Credenciais de API não são exportadas — devem ser reconfiguradas no destino
-    configuracoes: db.prepare(
-      `SELECT * FROM configuracoes WHERE chave NOT IN ('anbima_client_id', 'anbima_client_secret')`
-    ).all(),
+    // Credenciais de API não são exportadas — devem ser reconfiguradas no destino.
+    // Usa o mesmo SENSITIVE_CONFIG_KEYS do GET/PUT (não uma lista solta em SQL,
+    // que ficou desatualizada antes: só filtrava ANBIMA, deixando as URLs
+    // Economatica — que carregam um token de acesso embutido — vazarem em
+    // qualquer dump exportado).
+    configuracoes: db.prepare('SELECT * FROM configuracoes').all()
+      .filter((r) => !SENSITIVE_CONFIG_KEYS.has(r.chave)),
   }
   res.json(exportData)
 })
