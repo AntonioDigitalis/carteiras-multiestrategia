@@ -4,6 +4,9 @@ import { getDb } from '../db/database.js'
 
 const router = Router()
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const MES_RE = /^\d{4}-\d{2}$/
+
 // GET /api/external/fundo/:cnpj
 router.get('/fundo/:cnpj', async (req, res) => {
   try {
@@ -44,8 +47,11 @@ router.get('/ticker/:ticker', async (req, res) => {
 // GET /api/external/cdi
 router.get('/cdi', async (req, res) => {
   try {
-    const db = getDb()
     const { inicio, fim } = req.query
+    if (!DATE_RE.test(inicio || '') || !DATE_RE.test(fim || '')) {
+      return res.status(400).json({ error: 'inicio e fim devem ser YYYY-MM-DD' })
+    }
+    const db = getDb()
     const rows = db.prepare(
       `SELECT data, valor FROM dados_macro WHERE serie = 'CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
     ).all(inicio, fim)
@@ -68,8 +74,11 @@ router.get('/cdi', async (req, res) => {
 // GET /api/external/ipca
 router.get('/ipca', async (req, res) => {
   try {
-    const db = getDb()
     const { inicio, fim } = req.query
+    if (!MES_RE.test(inicio || '') || !MES_RE.test(fim || '')) {
+      return res.status(400).json({ error: 'inicio e fim devem ser YYYY-MM' })
+    }
+    const db = getDb()
     const rows = db.prepare(
       `SELECT data, valor FROM dados_macro WHERE serie = 'IPCA_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
     ).all(inicio + '-01', fim + '-01')
