@@ -11,6 +11,21 @@ const router = Router()
 // Estado do sync-all em andamento (processo único do backend, uma sincronização por vez)
 let syncStatus = { running: false, total: 0, processed: 0, sincronizados: 0, erros: [], economatica: null }
 
+// Marcador persistido em configuracoes (não em memória): se o backend reiniciar
+// no meio de um sync-all, syncStatus volta a running:false zerado e o frontend
+// mostraria "concluído" mesmo com a sincronização interrompida pela metade.
+// Ao subir, se sobrou marcador de uma execução anterior que nunca chegou ao
+// finally, avisa no primeiro /sync-status em vez de ficar em silêncio.
+const MARCADOR_SYNC = '_sync_all_em_andamento'
+;(function checarSyncInterrompido() {
+  const db = getDb()
+  const marca = db.prepare('SELECT valor FROM configuracoes WHERE chave = ?').get(MARCADOR_SYNC)
+  if (marca) {
+    syncStatus.erros.push(`Sincronização anterior (iniciada em ${marca.valor}) foi interrompida — o backend reiniciou no meio.`)
+    db.prepare('DELETE FROM configuracoes WHERE chave = ?').run(MARCADOR_SYNC)
+  }
+})()
+
 // GET /api/cotas/sync-status — precisa vir antes de /:produtoId, senão é capturada por ela
 router.get('/sync-status', (req, res) => {
   const { running, total, processed, sincronizados, erros, economatica } = syncStatus
@@ -77,29 +92,33 @@ router.post('/:produtoId/sync', async (req, res) => {
 
       // Detectar splits/inplits antes de inserir
       const anterior = db.prepare(
-        `SELECT valor, valor_ajustado FROM cotas_cache WHERE produto_id = ? ORDER BY data DESC LIMIT 1`
+        `SELECT data, valor, valor_ajustado FROM cotas_cache WHERE produto_id = ? ORDER BY data DESC LIMIT 1`
       ).get(produto.id)
 
       insertMany(produto.id, rows)
 
-      // Verificar splits
-      if (anterior && rows.length > 0) {
-        const ultimo = rows[rows.length - 1]
-        const adj = ultimo.adjustedClose ?? ultimo.close
-        const nominal = ultimo.close
-        if (nominal > 0 && Math.abs(adj / nominal - 1) > 0.15) {
-          const ratio = adj / nominal
+      // Verificar splits: compara o preço AJUSTADO da MESMA data antes e depois
+      // do fetch. O nominal de uma data passada não muda; o ajustado sim,
+      // quando a fonte reajusta o histórico retroativamente após um split real.
+      // (Comparar ajustado vs nominal do dia mais recente do fetch não
+      // funciona: por construção não há ação futura aplicada ainda, então
+      // quase sempre são iguais — o alerta nunca disparava de fato.)
+      if (anterior?.valor_ajustado != null && anterior.valor_ajustado > 0) {
+        const linhaMesmaData = rows.find((r) => r.date === anterior.data)
+        const adjNovo = linhaMesmaData ? (linhaMesmaData.adjustedClose ?? linhaMesmaData.close) : null
+        if (adjNovo != null && Math.abs(adjNovo / anterior.valor_ajustado - 1) > 0.15) {
+          const ratio = adjNovo / anterior.valor_ajustado
           const tipo = ratio > 1 ? 'split' : 'inplit'
           db.prepare(`INSERT OR IGNORE INTO eventos_corporativos (ticker, data, tipo, valor, descricao, fonte)
             VALUES (?, ?, ?, ?, ?, 'sync')`)
             .run(produto.identificador, hoje, tipo, ratio,
-              `Razão ${ratio.toFixed(4)} — divergência de ${((Math.abs(ratio - 1)) * 100).toFixed(1)}% entre preço ajustado e nominal`)
+              `Razão ${ratio.toFixed(4)} — divergência de ${((Math.abs(ratio - 1)) * 100).toFixed(1)}% no preço ajustado de ${anterior.data} entre syncs`)
           db.prepare(`
             INSERT INTO alertas_auditoria (tipo, categoria, titulo, descricao, ativo, produto_id, data, valor_bruto, valor_usado, status)
             VALUES ('warning', 'split', 'Possível Split/Inplit detectado', ?, ?, ?, ?, ?, ?, 'ativo')
           `).run(
-            `Divergência de ${((Math.abs(adj / nominal - 1)) * 100).toFixed(1)}% entre preço ajustado e nominal`,
-            produto.identificador, produto.id, hoje, nominal.toFixed(2), adj.toFixed(2),
+            `Preço ajustado de ${anterior.data} mudou ${((Math.abs(ratio - 1)) * 100).toFixed(1)}% entre este sync e o anterior`,
+            produto.identificador, produto.id, hoje, anterior.valor_ajustado.toFixed(2), adjNovo.toFixed(2),
           )
         }
       }
@@ -201,9 +220,17 @@ router.post('/sync-all', (req, res) => {
   syncStatus = { running: true, total: identificadores.length, processed: 0, sincronizados: 0, erros: [], economatica: null }
   res.json({ started: true, total: identificadores.length })
 
+  db.prepare(
+    `INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
+  ).run(MARCADOR_SYNC, new Date().toISOString())
+
   executarSyncAll(db, identificadores)
     .catch((e) => { syncStatus.erros.push(`Erro fatal: ${e.message}`) })
-    .finally(() => { syncStatus.running = false })
+    .finally(() => {
+      syncStatus.running = false
+      db.prepare('DELETE FROM configuracoes WHERE chave = ?').run(MARCADOR_SYNC)
+    })
 })
 
 async function executarSyncAll(db, identificadores) {
