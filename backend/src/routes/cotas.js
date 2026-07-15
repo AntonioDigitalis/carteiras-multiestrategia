@@ -5,6 +5,7 @@ import {
   fetchCDIDiario, fetchCDIAcumuladoMensal, fetchIPCAMensal,
 } from '../services/external.js'
 import { sincronizarEconomatica } from '../services/economatica.js'
+import { computarSaude, gerarAlertasSaude, verificarAlocacoes } from './auditoria.js'
 
 const router = Router()
 
@@ -302,6 +303,16 @@ async function executarSyncAll(db, identificadores) {
     verificarCotasTravadas(db)
   } catch (e) {
     syncStatus.erros.push(`Verificação pós-sync: ${e.message}`)
+  }
+
+  // Alertas de auditoria (saúde de dados + divergência macro/micro) — gerados
+  // só aqui, não mais a cada GET /auditoria/saude (que agora é leitura pura)
+  try {
+    const { macro, produtos } = computarSaude(db)
+    gerarAlertasSaude(db, macro, produtos)
+    verificarAlocacoes(db)
+  } catch (e) {
+    syncStatus.erros.push(`Alertas de auditoria: ${e.message}`)
   }
 }
 

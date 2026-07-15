@@ -42,16 +42,14 @@ router.put('/alertas/:id', (req, res) => {
   res.json({ ok: true })
 })
 
-// GET /api/auditoria/saude
-router.get('/saude', (req, res) => {
-  const db = getDb()
-
-  // Todos os meses com estados cadastrados
+// Calcula o snapshot de saúde (macro + produtos por período) — leitura pura,
+// sem gravar nada. Compartilhado entre GET /saude e a geração de alertas
+// (chamada só ao fim do sync-all, não a cada carregamento da página).
+function computarSaude(db) {
   const meses = db.prepare(
     'SELECT DISTINCT mes FROM estados_portfolio ORDER BY mes'
   ).all().map((r) => r.mes)
 
-  // Status de dados macro por mês
   const macro = meses.map((mes) => {
     const cdi = db.prepare(
       "SELECT COUNT(*) as n FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?"
@@ -62,7 +60,6 @@ router.get('/saude', (req, res) => {
     return { mes, cdi, ipca }
   })
 
-  // Todos os produtos agrupados por (nome, identificador), excluindo rf_curva
   const rows = db.prepare(`
     SELECT p.id, p.nome, p.tipo, p.identificador, p.classe, e.mes, e.carteira_id,
       c.nome AS carteira_nome, pf.nome AS perfil_nome
@@ -73,7 +70,24 @@ router.get('/saude', (req, res) => {
     ORDER BY p.nome, e.mes
   `).all()
 
-  // Agrupar por (nome, identificador)
+  // Cache por identificador — um ticker/CNPJ aparece uma vez por estado/mês em
+  // que foi usado (PETR4 pode ter dezenas de ocorrências); sem isso a mesma
+  // query de contagem rodava uma vez por ocorrência.
+  const cotasPorIdent = new Map()
+  function getCotasInfo(ident, produtoId) {
+    const chave = ident ?? `__produto_${produtoId}`
+    if (cotasPorIdent.has(chave)) return cotasPorIdent.get(chave)
+    const info = ident
+      ? db.prepare(
+          `SELECT COUNT(*) as n, MAX(cc.data) as ultima FROM cotas_cache cc
+           JOIN produtos p2 ON cc.produto_id = p2.id
+           WHERE p2.identificador = ?`
+        ).get(ident)
+      : db.prepare('SELECT COUNT(*) as n, MAX(data) as ultima FROM cotas_cache WHERE produto_id=?').get(produtoId)
+    cotasPorIdent.set(chave, info)
+    return info
+  }
+
   const prodMap = new Map()
   for (const r of rows) {
     const key = `${r.tipo}__${r.nome}__${r.identificador ?? ''}`
@@ -81,7 +95,7 @@ router.get('/saude', (req, res) => {
       prodMap.set(key, { nome: r.nome, tipo: r.tipo, identificador: r.identificador, classe: r.classe, periodos: [], carteira_ids: new Set() })
     }
     prodMap.get(key).carteira_ids.add(r.carteira_id)
-    let status, n_cotas = null, nota = null
+    let status, n_cotas = null, nota = null, ultima_cota = null
     if (r.tipo === 'rf_curva') {
       // RF curva precisa de dados macro (CDI ou IPCA)
       const macroMes = macro.find((m) => m.mes === r.mes)
@@ -94,27 +108,26 @@ router.get('/saude', (req, res) => {
     } else {
       // Busca cotas por identificador (CNPJ ou ticker), não por produto_id individual.
       // O calculador também faz isso, então um único produto sincronizado cobre todos os estados.
-      const ident = r.identificador || null
-      if (ident) {
-        n_cotas = db.prepare(
-          `SELECT COUNT(*) as n FROM cotas_cache cc
-           JOIN produtos p2 ON cc.produto_id = p2.id
-           WHERE p2.identificador = ?`
-        ).get(ident).n
-      } else {
-        n_cotas = db.prepare('SELECT COUNT(*) as n FROM cotas_cache WHERE produto_id=?').get(r.id).n
-      }
+      const info = getCotasInfo(r.identificador || null, r.id)
+      n_cotas = info.n
+      ultima_cota = info.ultima
       status = n_cotas > 0 ? 'ok' : 'sem_cotas'
     }
-    prodMap.get(key).periodos.push({ mes: r.mes, produto_id: r.id, n_cotas, status, nota })
+    prodMap.get(key).periodos.push({ mes: r.mes, produto_id: r.id, n_cotas, status, nota, ultima_cota })
   }
 
   const produtos = Array.from(prodMap.values()).map((p) => ({
     ...p,
     carteira_ids: Array.from(p.carteira_ids),
+    ultima_cota: p.periodos.reduce((max, pe) => (pe.ultima_cota && (!max || pe.ultima_cota > max)) ? pe.ultima_cota : max, null),
   }))
 
-  // Auto-gerar alertas para dados faltantes (sem duplicatas)
+  return { macro, produtos, meses }
+}
+
+// Cria/fecha alertas de dados macro e cotas ausentes. Só deve ser chamada ao
+// fim de uma sincronização (cotas.js) — GET /saude não grava nada, só lê.
+function gerarAlertasSaude(db, macro, produtos) {
   const alertaStmt = db.prepare(`
     INSERT INTO alertas_auditoria (tipo, categoria, titulo, ativo, descricao)
     SELECT 'warning', 'macro', ?, ?, ?
@@ -170,8 +183,12 @@ router.get('/saude', (req, res) => {
       }
     }
   })()
+}
 
-  verificarAlocacoes(db)
+// GET /api/auditoria/saude — leitura pura; alertas são gerados só no sync-all
+router.get('/saude', (req, res) => {
+  const db = getDb()
+  const { macro, produtos, meses } = computarSaude(db)
 
   const carteiras = db.prepare(`
     SELECT DISTINCT c.id, c.nome, pf.nome AS perfil_nome
@@ -283,7 +300,7 @@ function verificarAlocacoes(db) {
               .run(`${label}: ${desc}`, hoje, existente.id)
           } else {
             db.prepare(`INSERT INTO alertas_auditoria (tipo, categoria, titulo, descricao, ativo, data, status) VALUES ('warning',?,?,?,?,?,'ativo')`)
-              .run(tituloMicro, `${label}: ${desc}`, ativo, hoje)
+              .run('alocacao_micro', tituloMicro, `${label}: ${desc}`, ativo, hoje)
           }
         } else {
           db.prepare(`UPDATE alertas_auditoria SET status='revisado', updated_at=datetime('now')
@@ -295,7 +312,7 @@ function verificarAlocacoes(db) {
   })()
 }
 
-export { verificarAlocacoes }
+export { verificarAlocacoes, computarSaude, gerarAlertasSaude }
 
 // GET /api/auditoria/eventos
 router.get('/eventos', (req, res) => {
