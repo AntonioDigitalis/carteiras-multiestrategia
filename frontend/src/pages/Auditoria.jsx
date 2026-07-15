@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AlertCircle, AlertTriangle, CheckCircle, Filter, RefreshCw, Download, Activity, Zap, TrendingDown, TrendingUp, DollarSign } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, Filter, RefreshCw, Download, Activity, Zap, TrendingDown, TrendingUp, DollarSign, ChevronDown, ChevronRight } from 'lucide-react'
 import { api } from '../services/api'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { clsx } from 'clsx'
@@ -11,7 +11,8 @@ export default function Auditoria() {
   const [saude, setSaude] = useState(null)
   const [eventos, setEventos] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filtro, setFiltro] = useState('todos')
+  const [erros, setErros] = useState({}) // { alertas: 'msg', ... } — só as fontes que falharam
+  const [filtro, setFiltro] = useState('ativos')
   const [filtroCarteira, setFiltroCarteira] = useState('todas')
 
   useEffect(() => {
@@ -20,22 +21,20 @@ export default function Auditoria() {
 
   async function carregarDados() {
     setLoading(true)
-    try {
-      const [a, l, s, ev] = await Promise.all([
-        api.getAlertas(),
-        api.getLogCaptacao(),
-        api.getSaude(),
-        api.getEventos(),
-      ])
-      setAlertas(a)
-      setLog(l)
-      setSaude(s)
-      setEventos(ev)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
+    // allSettled: uma fonte falhar não pode apagar as outras 3 que carregaram bem
+    const [a, l, s, ev] = await Promise.allSettled([
+      api.getAlertas(),
+      api.getLogCaptacao(),
+      api.getSaude(),
+      api.getEventos(),
+    ])
+    const novosErros = {}
+    if (a.status === 'fulfilled') setAlertas(a.value); else novosErros.alertas = a.reason?.message || 'Falha ao carregar'
+    if (l.status === 'fulfilled') setLog(l.value); else novosErros.log = l.reason?.message || 'Falha ao carregar'
+    if (s.status === 'fulfilled') setSaude(s.value); else novosErros.saude = s.reason?.message || 'Falha ao carregar'
+    if (ev.status === 'fulfilled') setEventos(ev.value); else novosErros.eventos = ev.reason?.message || 'Falha ao carregar'
+    setErros(novosErros)
+    setLoading(false)
   }
 
   async function revisarEvento(id) {
@@ -62,9 +61,18 @@ export default function Auditoria() {
 
   const nAtivos = alertas.filter((a) => a.status === 'ativo').length
   const nWarning = alertas.filter((a) => a.tipo === 'warning' && a.status === 'ativo').length
+  const nCritico = alertas.filter((a) => a.tipo === 'error' && a.status === 'ativo').length
+  const nCotaTravada = alertas.filter((a) => a.categoria === 'cota_travada' && a.status === 'ativo').length
   const nRevisados = alertas.filter((a) => a.status === 'revisado').length
   const nRecentes = log.filter((l) => isRecente(l.timestamp)).length
   const nEventos = eventos.filter((e) => !e.revisado).length
+
+  const ERRO_LABELS = { alertas: 'Alertas', log: 'Log de Captação', saude: 'Saúde dos Dados', eventos: 'Eventos Corporativos' }
+
+  function irPara(novaTab, novoFiltro) {
+    setTab(novaTab)
+    if (novoFiltro) setFiltro(novoFiltro)
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -94,8 +102,54 @@ export default function Auditoria() {
         </div>
       </div>
 
+      {/* Erro parcial: uma fonte pode falhar sem apagar as outras */}
+      {Object.keys(erros).length > 0 && (
+        <div className="card border border-red-800/50 bg-red-900/20 flex items-center gap-2 text-xs text-accent-red">
+          <AlertCircle size={14} className="flex-shrink-0" />
+          <span>Não foi possível carregar: {Object.keys(erros).map((k) => ERRO_LABELS[k]).join(', ')}.</span>
+          <button onClick={carregarDados} className="underline hover:no-underline">Tentar de novo</button>
+        </div>
+      )}
+
+      {/* Veredito: resposta direta a "está tudo bem ou preciso agir?" */}
+      {nAtivos === 0 && nEventos === 0 ? (
+        <div className="card flex items-center gap-3 border border-green-800/40 bg-green-900/10">
+          <CheckCircle size={22} className="text-accent-green flex-shrink-0" />
+          <div className="text-sm font-medium text-slate-200">Tudo em ordem — nenhum alerta ativo nem evento corporativo pendente.</div>
+        </div>
+      ) : (
+        <div className="card flex items-start gap-3 border border-yellow-800/40 bg-yellow-900/10">
+          <AlertTriangle size={22} className="text-accent-yellow flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-slate-200">{nAtivos + nEventos} ação(ões) pendente(s)</div>
+            <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {nCritico > 0 && (
+                <button onClick={() => irPara('alertas', 'ativos')} className="hover:underline text-accent-red">
+                  {nCritico} alerta(s) crítico(s)
+                </button>
+              )}
+              {nCotaTravada > 0 && (
+                <button onClick={() => irPara('alertas', 'ativos')} className="hover:underline text-accent-red">
+                  {nCotaTravada} cota(s) travada(s)
+                </button>
+              )}
+              {nAtivos - nCritico - nCotaTravada > 0 && (
+                <button onClick={() => irPara('alertas', 'ativos')} className="hover:underline">
+                  {nAtivos - nCritico - nCotaTravada} outro(s) alerta(s)
+                </button>
+              )}
+              {nEventos > 0 && (
+                <button onClick={() => irPara('eventos')} className="hover:underline">
+                  {nEventos} evento(s) corporativo(s) sem revisar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         {[
           { label: 'Alertas Ativos', value: nAtivos, color: 'text-accent-red', icon: AlertCircle },
           { label: 'Alertas Amarelos', value: nWarning, color: 'text-accent-yellow', icon: AlertTriangle },
@@ -169,11 +223,18 @@ function SaudeTab({ saude, filtroCarteira, onRefresh }) {
     ? produtos.filter((p) => !p.carteira_ids || p.carteira_ids.length === 0)
     : produtos.filter((p) => p.carteira_ids?.includes(Number(filtroCarteira)))
 
-  const produtosFiltrados = filtroTipo === 'todos'
+  const produtosFiltrados = (filtroTipo === 'todos'
     ? produtosPorCarteira
     : filtroTipo === 'sem_dados'
     ? produtosPorCarteira.filter((p) => p.periodos.some((pe) => pe.status !== 'ok'))
     : produtosPorCarteira.filter((p) => p.tipo === filtroTipo)
+  ).slice().sort((a, b) => {
+    // Produtos com pendência primeiro — quem abre a aba quer ver o que
+    // precisa de ação, não rolar a lista inteira procurando.
+    const problemaA = a.periodos.some((pe) => pe.status !== 'ok') ? 0 : 1
+    const problemaB = b.periodos.some((pe) => pe.status !== 'ok') ? 0 : 1
+    return problemaA - problemaB
+  })
 
   async function buscarMacro() {
     if (!meses.length) return
@@ -277,6 +338,7 @@ function SaudeTab({ saude, filtroCarteira, onRefresh }) {
               <tr className="text-slate-500 border-b border-border">
                 <th className="text-left pb-2 font-medium w-64">Ativo</th>
                 <th className="text-left pb-2 font-medium">Tipo</th>
+                <th className="text-left pb-2 font-medium">Última cota</th>
                 {meses.map((mes) => (
                   <th key={mes} className="text-center pb-2 font-medium px-1">{mes.slice(2)}</th>
                 ))}
@@ -301,6 +363,15 @@ function SaudeTab({ saude, filtroCarteira, onRefresh }) {
                       {p.tipo}
                     </span>
                   </td>
+                  <td className="py-1.5 pr-4">
+                    {p.ultima_cota ? (
+                      <span className={clsx('font-mono text-[10px]', diasDesatualizado(p.ultima_cota) > 15 ? 'text-accent-red' : 'text-slate-500')}>
+                        {p.ultima_cota}
+                      </span>
+                    ) : (
+                      <span className="text-slate-700">—</span>
+                    )}
+                  </td>
                   {meses.map((mes) => {
                     const periodo = p.periodos.find((pe) => pe.mes === mes)
                     if (!periodo) return (
@@ -317,7 +388,7 @@ function SaudeTab({ saude, filtroCarteira, onRefresh }) {
                 </tr>
               ))}
               {produtosFiltrados.length === 0 && (
-                <tr><td colSpan={meses.length + 2} className="py-6 text-center text-slate-600">Nenhum produto</td></tr>
+                <tr><td colSpan={meses.length + 3} className="py-6 text-center text-slate-600">Nenhum produto</td></tr>
               )}
             </tbody>
           </table>
@@ -352,6 +423,36 @@ function StatusBadge({ ok, label }) {
 // ── Alertas ────────────────────────────────────────────────
 
 function AlertasTab({ alertas, filtro, setFiltro, onMarcar }) {
+  const [expandidos, setExpandidos] = useState(() => new Set())
+
+  // Agrupa por (categoria, título) — cotas travadas e "cotas ausentes: X" já
+  // compartilham o mesmo título por natureza; sem agrupar, 764 alertas
+  // revisados+ativos afogavam os poucos que realmente pedem atenção.
+  const grupos = []
+  const porChave = new Map()
+  for (const a of alertas) {
+    const chave = `${a.categoria}__${a.titulo}`
+    if (!porChave.has(chave)) {
+      const grupo = { chave, categoria: a.categoria, titulo: a.titulo, tipo: a.tipo, itens: [] }
+      porChave.set(chave, grupo)
+      grupos.push(grupo)
+    }
+    porChave.get(chave).itens.push(a)
+  }
+  grupos.sort((a, b) => b.itens.length - a.itens.length)
+
+  function toggle(chave) {
+    setExpandidos((prev) => {
+      const next = new Set(prev)
+      next.has(chave) ? next.delete(chave) : next.add(chave)
+      return next
+    })
+  }
+
+  async function marcarGrupo(itens, status) {
+    for (const it of itens) await onMarcar(it.id, status)
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -369,15 +470,65 @@ function AlertasTab({ alertas, filtro, setFiltro, onMarcar }) {
         ))}
       </div>
 
-      {alertas.length === 0 ? (
+      {grupos.length === 0 ? (
         <div className="card text-center py-12 text-slate-500 text-sm">
           <CheckCircle size={24} className="mx-auto mb-2 text-accent-green" />
           Nenhum alerta {filtro === 'todos' ? '' : filtro}
         </div>
       ) : (
         <div className="space-y-2">
-          {alertas.map((a) => (
-            <AlertaItem key={a.id} alerta={a} onMarcar={onMarcar} />
+          {grupos.map((g) =>
+            g.itens.length === 1 ? (
+              <AlertaItem key={g.chave} alerta={g.itens[0]} onMarcar={onMarcar} />
+            ) : (
+              <GrupoAlertas
+                key={g.chave}
+                grupo={g}
+                expandido={expandidos.has(g.chave)}
+                onToggle={() => toggle(g.chave)}
+                onMarcar={onMarcar}
+                onMarcarGrupo={marcarGrupo}
+              />
+            )
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GrupoAlertas({ grupo, expandido, onToggle, onMarcar, onMarcarGrupo }) {
+  const isCritical = grupo.tipo === 'error'
+  const isWarning = grupo.tipo === 'warning'
+  const nAtivosGrupo = grupo.itens.filter((it) => it.status === 'ativo').length
+
+  return (
+    <div className={clsx(
+      'rounded-lg border',
+      isCritical ? 'bg-red-900/20 border-red-800/50' :
+      isWarning ? 'bg-yellow-900/20 border-yellow-800/50' :
+      'bg-bg-secondary border-border'
+    )}>
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-3 text-left">
+        {expandido ? <ChevronDown size={14} className="text-slate-500 flex-shrink-0" /> : <ChevronRight size={14} className="text-slate-500 flex-shrink-0" />}
+        {isCritical && <AlertCircle size={15} className="text-accent-red flex-shrink-0" />}
+        {isWarning && <AlertTriangle size={15} className="text-accent-yellow flex-shrink-0" />}
+        <span className="text-xs font-medium text-slate-200 flex-1">{grupo.titulo}</span>
+        <span className="text-[10px] text-slate-500">{grupo.itens.length} ocorrências{nAtivosGrupo > 0 && nAtivosGrupo < grupo.itens.length ? ` (${nAtivosGrupo} ativas)` : ''}</span>
+        {nAtivosGrupo > 0 && (
+          <span
+            role="button"
+            onClick={(e) => { e.stopPropagation(); onMarcarGrupo(grupo.itens.filter((it) => it.status === 'ativo'), 'revisado') }}
+            className="text-[10px] px-2 py-1 rounded bg-green-900/30 text-accent-green hover:bg-green-900/50 flex-shrink-0"
+          >
+            Marcar grupo como revisado
+          </span>
+        )}
+      </button>
+      {expandido && (
+        <div className="px-3 pb-3 space-y-2">
+          {grupo.itens.map((a) => (
+            <AlertaItem key={a.id} alerta={a} onMarcar={onMarcar} compacto />
           ))}
         </div>
       )}
@@ -385,28 +536,48 @@ function AlertasTab({ alertas, filtro, setFiltro, onMarcar }) {
   )
 }
 
-function AlertaItem({ alerta, onMarcar }) {
+// Alertas de cota travada carregam a data de detecção em `data`, mas a
+// descrição fixa "últimos 5 dias" nunca atualiza — calcula há quanto tempo
+// de fato está travada a partir de `data` até hoje.
+function diasTravada(alerta) {
+  if (alerta.categoria !== 'cota_travada' || !alerta.data) return null
+  const dias = Math.floor((Date.now() - new Date(alerta.data).getTime()) / 86400000)
+  return dias >= 0 ? dias : null
+}
+
+function AlertaItem({ alerta, onMarcar, compacto }) {
   const isCritical = alerta.tipo === 'error'
   const isWarning = alerta.tipo === 'warning'
+  const dias = diasTravada(alerta)
 
   return (
     <div
       className={clsx(
-        'flex items-start gap-3 p-3 rounded-lg border text-sm',
-        isCritical ? 'bg-red-900/20 border-red-800/50' :
-        isWarning ? 'bg-yellow-900/20 border-yellow-800/50' :
-        'bg-bg-secondary border-border'
+        'flex items-start gap-3 rounded-lg text-sm',
+        compacto ? 'bg-black/10 p-2' : clsx(
+          'p-3 border',
+          isCritical ? 'bg-red-900/20 border-red-800/50' :
+          isWarning ? 'bg-yellow-900/20 border-yellow-800/50' :
+          'bg-bg-secondary border-border'
+        )
       )}
     >
-      <div className="mt-0.5 flex-shrink-0">
-        {isCritical && <AlertCircle size={15} className="text-accent-red" />}
-        {isWarning && <AlertTriangle size={15} className="text-accent-yellow" />}
-        {!isCritical && !isWarning && <CheckCircle size={15} className="text-accent-green" />}
-      </div>
+      {!compacto && (
+        <div className="mt-0.5 flex-shrink-0">
+          {isCritical && <AlertCircle size={15} className="text-accent-red" />}
+          {isWarning && <AlertTriangle size={15} className="text-accent-yellow" />}
+          {!isCritical && !isWarning && <CheckCircle size={15} className="text-accent-green" />}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-slate-200">{alerta.titulo}</span>
+          {!compacto && <span className="text-xs font-medium text-slate-200">{alerta.titulo}</span>}
           <span className="text-[10px] text-slate-500">{alerta.ativo}</span>
+          {dias != null && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/40 text-accent-red font-medium">
+              travada há {dias} dia{dias === 1 ? '' : 's'}
+            </span>
+          )}
           {alerta.carteira_nome && (
             <span className="text-[10px] bg-bg-tertiary text-slate-500 border border-border rounded px-1.5 py-0.5">
               {alerta.perfil_nome} — {alerta.carteira_nome}
@@ -534,6 +705,33 @@ function EventosTab({ eventos, filtroCarteira, saude, onRevisar }) {
 
 // ── Log ────────────────────────────────────────────────────
 
+// Não há um "id de sessão" de sync no log — aproxima o último lote pelas
+// entradas dentro de uma janela de 30min antes do timestamp mais recente
+// (uma sincronização real de ~130 itens já levou alguns minutos).
+function resumoUltimaSincronizacao(log) {
+  if (log.length === 0) return null
+  const maisRecente = log[0].timestamp
+  const limite = new Date(maisRecente).getTime() - 30 * 60 * 1000
+  const doLote = log.filter((l) => new Date(l.timestamp).getTime() >= limite)
+  const erroItens = doLote.filter((l) => l.status === 'erro')
+  return {
+    timestamp: maisRecente,
+    ok: doLote.filter((l) => l.status === 'ok').length,
+    erros: erroItens.length,
+    erroItens,
+  }
+}
+
+function formatarRelativo(timestamp) {
+  const diffMin = Math.floor((Date.now() - new Date(timestamp).getTime()) / 60000)
+  if (diffMin < 1) return 'agora mesmo'
+  if (diffMin < 60) return `há ${diffMin} min`
+  const diffH = Math.floor(diffMin / 60)
+  if (diffH < 24) return `há ${diffH}h`
+  const diffD = Math.floor(diffH / 24)
+  return `há ${diffD} dia${diffD === 1 ? '' : 's'}`
+}
+
 function LogTab({ log, saude, filtroCarteira }) {
   const logFiltrado = (() => {
     if (filtroCarteira === 'todas') return log
@@ -546,9 +744,34 @@ function LogTab({ log, saude, filtroCarteira }) {
       .filter(Boolean)
     return log.filter((l) => produtosDaCarteira.includes(l.ativo))
   })()
+  const resumo = resumoUltimaSincronizacao(log)
   return (
+    <div className="space-y-3">
+      {resumo && (
+        <div className="card">
+          <div className="flex items-center gap-3 flex-wrap text-xs">
+            <span className="text-slate-300 font-medium">
+              Última sincronização: {formatarRelativo(resumo.timestamp)}
+            </span>
+            <span className="text-accent-green">{resumo.ok} ok</span>
+            {resumo.erros > 0 && <span className="text-accent-red font-medium">{resumo.erros} erro{resumo.erros === 1 ? '' : 's'}</span>}
+          </div>
+          {resumo.erros > 0 && (
+            <div className="mt-2 space-y-1 border-t border-border pt-2">
+              {resumo.erroItens.slice(0, 8).map((l) => (
+                <div key={l.id} className="text-[10px] text-accent-red">
+                  <span className="font-mono">{l.ativo}</span>{l.detalhes ? `: ${l.detalhes}` : ''}
+                </div>
+              ))}
+              {resumo.erroItens.length > 8 && (
+                <div className="text-[10px] text-slate-600">+ {resumo.erroItens.length - 8} outro(s) — veja a tabela abaixo</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     <div className="card overflow-hidden">
-      <div className="text-sm font-medium text-slate-300 mb-3">Log de Captação</div>
+      <div className="text-sm font-medium text-slate-300 mb-3">Log de Captação{filtroCarteira !== 'todas' ? '' : ` (últimos ${logFiltrado.length})`}</div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -589,6 +812,7 @@ function LogTab({ log, saude, filtroCarteira }) {
         </table>
       </div>
     </div>
+    </div>
   )
 }
 
@@ -597,4 +821,8 @@ function isRecente(timestamp) {
   const ts = new Date(timestamp)
   const diff = Date.now() - ts.getTime()
   return diff < 24 * 60 * 60 * 1000
+}
+
+function diasDesatualizado(dataISO) {
+  return Math.floor((Date.now() - new Date(dataISO).getTime()) / 86400000)
 }
