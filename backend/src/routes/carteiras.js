@@ -62,8 +62,9 @@ router.get('/:id', (req, res) => {
 router.put('/:id', (req, res) => {
   const db = getDb()
   const { nome, descricao } = req.body
+  if (!nome?.trim()) return res.status(400).json({ error: 'nome obrigatório' })
   db.prepare('UPDATE carteiras SET nome = ?, descricao = ? WHERE id = ?')
-    .run(nome, descricao, req.params.id)
+    .run(nome.trim(), descricao, req.params.id)
   res.json({ ok: true })
 })
 

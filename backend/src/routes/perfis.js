@@ -12,7 +12,8 @@ router.get('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const db = getDb()
   const { nome } = req.body
-  db.prepare('UPDATE perfis SET nome = ? WHERE id = ?').run(nome, req.params.id)
+  if (!nome?.trim()) return res.status(400).json({ error: 'Nome obrigatório' })
+  db.prepare('UPDATE perfis SET nome = ? WHERE id = ?').run(nome.trim(), req.params.id)
   res.json({ ok: true })
 })
 
