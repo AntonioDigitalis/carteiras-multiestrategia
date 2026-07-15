@@ -1062,9 +1062,11 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   // ── Retornos por janela fixa ────────────────────────────
   const anoFim = mesFimStr.slice(0, 4)
   const retorno_mtd = retornosMensais.length > 0 ? retornosMensais.at(-1).retorno : null
-  const retorno_ytd = retornosMensais
-    .filter(r => r.mes.startsWith(anoFim))
-    .reduce((p, r) => p * (1 + r.retorno), 1) - 1 || null
+  const mesesYTD = retornosMensais.filter(r => r.mes.startsWith(anoFim))
+  // `|| null` trocado por checagem explícita de length: um YTD exatamente
+  // 0% também zera via reduce e virava null indevidamente (indistinguível
+  // de "nenhum mês no ano corrente").
+  const retorno_ytd = mesesYTD.length > 0 ? mesesYTD.reduce((p, r) => p * (1 + r.retorno), 1) - 1 : null
   const ultimos12 = retornosMensais.slice(-12)
   const retorno_12m = ultimos12.length >= 12 ? ultimos12.reduce((p, r) => p * (1 + r.retorno), 1) - 1 : null
   const ultimos24 = retornosMensais.slice(-24)
@@ -2633,6 +2635,12 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     // é o valor do mês inteiro, não decomposto por sub-período (diferente de
     // retorno_acum, que compõe corretamente por sub-período abaixo).
     const benchmarkAplicado = new Set()
+    // Soma as contribuições de cada classe do mês; retornoTotal compõe UMA VEZ
+    // por mês (abaixo, fora do loop de classes) — multiplicar retornoTotal a
+    // cada classe (bug anterior) introduzia termos cruzados espúrios entre
+    // classes paralelas do mesmo mês, divergindo do retorno oficial de
+    // calcularRetornoEstado (que soma retornoClasse*pesoClasse, não compõe).
+    let retornoMesAcum = 0
 
     for (const cls of Object.keys(CLASSES)) {
       const pesoClasse = (aloc[cls] || 0) / 100
@@ -2732,8 +2740,10 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
       acumClasse[cls].contribuicao_acum += retornoClasse * pesoClasse
       acumClasse[cls].peso_medio += pesoClasse
       acumClasse[cls].n++
-      retornoTotal *= (1 + retornoClasse * pesoClasse)
+      retornoMesAcum += retornoClasse * pesoClasse
     }
+
+    retornoTotal *= (1 + retornoMesAcum)
   }
 
   const hoje = new Date().toISOString().split('T')[0]
