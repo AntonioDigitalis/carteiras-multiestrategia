@@ -31,6 +31,10 @@ const BATCH = 50000
 // Os feeds trazem histórico completo (IBOV desde 1967, papeis_rf desde 1990). O
 // app só usa de 2019 em diante — ignoramos datas anteriores para não inchar o banco.
 const DATA_MINIMA = '2019-01-01'
+// Confirma formato ISO antes de comparar como string com DATA_MINIMA — um
+// layout com data em DD/MM/YYYY (não previsto) aceitaria/rejeitaria linhas
+// silenciosamente na comparação de string sem essa checagem.
+const DATA_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function ensureCacheDir() {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true })
@@ -101,28 +105,52 @@ function processarArquivo(filePath, onRow, flush) {
     let batch = []
     let total = 0
     let valueCol = -1  // < 0 até o cabeçalho ser lido
+    let falhou = false
+    // Chama reject ANTES de rl.close(): close() dispara 'close' de forma
+    // síncrona, e se resolve() rodar antes do reject() aqui embaixo, o
+    // resolve vence (Promise se resolve na primeira chamada) — o erro seria
+    // engolido silenciosamente. A flag `falhou` também impede 'close' de
+    // resolver depois de uma falha já reportada.
+    function falhar(e) {
+      falhou = true
+      reject(e)
+      rl.close()
+    }
     rl.on('line', (line) => {
+      if (falhou) return
       if (valueCol < 0) {  // primeira linha = cabeçalho
         try { valueCol = acharColunaValor(splitCsv(line)) }
-        catch (e) { rl.close(); reject(e); return }
+        catch (e) { falhar(e) }
         return
       }
-      const fields = splitCsv(line)
-      const data = fields[1]
-      if (!data || data < DATA_MINIMA) return
-      const raw = fields[valueCol]
-      if (raw == null || raw === '-' || raw === '') return
-      const valor = parseFloat(raw)
-      if (isNaN(valor)) return
-      const rows = onRow({ ativo: fields[0], data, valor })
-      if (rows && rows.length) {
-        for (const r of rows) batch.push(r)
-        if (batch.length >= BATCH) { flush(batch); total += batch.length; batch = [] }
+      // Erro aqui (ex: flush do better-sqlite3) não seria capturado pelo
+      // Promise executor por acontecer dentro de um callback de EventEmitter —
+      // viraria uncaughtException e derrubaria o processo no meio do sync.
+      try {
+        const fields = splitCsv(line)
+        const data = fields[1]
+        if (!data || !DATA_RE.test(data) || data < DATA_MINIMA) return
+        const raw = fields[valueCol]
+        if (raw == null || raw === '-' || raw === '') return
+        const valor = parseFloat(raw)
+        if (isNaN(valor)) return
+        const rows = onRow({ ativo: fields[0], data, valor })
+        if (rows && rows.length) {
+          for (const r of rows) batch.push(r)
+          if (batch.length >= BATCH) { flush(batch); total += batch.length; batch = [] }
+        }
+      } catch (e) {
+        falhar(e)
       }
     })
     rl.on('close', () => {
-      if (batch.length) { flush(batch); total += batch.length }
-      resolve(total)
+      if (falhou) return
+      try {
+        if (batch.length) { flush(batch); total += batch.length }
+        resolve(total)
+      } catch (e) {
+        reject(e)
+      }
     })
     rl.on('error', reject)
   })
