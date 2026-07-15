@@ -37,6 +37,7 @@ export function useMetricas(carteiraId, period) {
 
   useEffect(() => {
     if (!carteiraId || !period) return
+    let cancelled = false
     setLoading(true)
     setError(null)
     const params = {}
@@ -44,9 +45,11 @@ export function useMetricas(carteiraId, period) {
     if (period.end) params.end = period.end
 
     api.getMetricas(carteiraId, params)
-      .then(setMetricas)
-      .catch(setError)
-      .finally(() => setLoading(false))
+      .then((data) => { if (!cancelled) setMetricas(data) })
+      .catch((e) => { if (!cancelled) setError(e) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
   }, [carteiraId, period?.start, period?.end])
 
   return { metricas, loading, error }
