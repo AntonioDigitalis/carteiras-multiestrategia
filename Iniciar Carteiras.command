@@ -10,22 +10,35 @@ echo "║    Carteiras Multiestratégia - v1.0.0        ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 
-cleanup() {
-  for port in 3001 5173; do
-    pid=$(lsof -ti tcp:$port 2>/dev/null)
-    [ -n "$pid" ] && kill -9 $pid 2>/dev/null
+# Mata um processo e toda sua árvore de descendentes (npx vite gera um
+# processo filho para o servidor real — matar só o PID direto o deixava
+# orfão rodando). Usa pgrep -P (relação real de processo pai/filho do SO),
+# não porta — evita derrubar outro app que porventura esteja nas mesmas
+# portas 3001/5173.
+matar_arvore() {
+  local pid=$1
+  for filho in $(pgrep -P "$pid" 2>/dev/null); do
+    matar_arvore "$filho"
   done
+  kill -9 "$pid" 2>/dev/null
+}
+
+cleanup() {
+  [ -n "$BACKEND_PID" ] && matar_arvore "$BACKEND_PID"
+  [ -n "$FRONTEND_PID" ] && matar_arvore "$FRONTEND_PID"
 }
 trap cleanup EXIT
 trap "exit" INT TERM HUP
 
 echo "▶ Iniciando backend (porta 3001)..."
 cd "$DIR/backend" && node src/index.js &
+BACKEND_PID=$!
 
 sleep 1
 
 echo "▶ Iniciando frontend (porta 5173)..."
 cd "$DIR/frontend" && npx vite &
+FRONTEND_PID=$!
 
 sleep 2
 open http://localhost:5173
