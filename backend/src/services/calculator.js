@@ -14,7 +14,7 @@ const LABELS_CLASSE = {
 }
 
 const BENCHMARKS_PASSIVA = {
-  pos_fixado:      '70% CDI + 30% IDA-DI (DEBB11)',
+  pos_fixado:      '60% CDI + 40% IDA-DI (DEBB11)',
   inflacao:        'IMA-B (IMAB11)',
   prefixado:       'IRF-M (IRFM11)',
   rf_global:       'AGG + Hedge BRL',
@@ -22,8 +22,13 @@ const BENCHMARKS_PASSIVA = {
   rv_brasil:       'Ibovespa',
   rv_global:       'ACWI + Hedge BRL',
   fundos_listados: 'IFIX',
-  alternativos:    'CDI',
+  alternativos:    'Ouro (Trend Ouro)',  // provisório — sem série de índice de ouro dedicada ainda
 }
+
+// Proxy de ouro para o benchmark de alternativos — CNPJ do Trend Ouro FIF Mult,
+// escolhido por ter o maior histórico disponível (Economatica desde 2019) entre
+// os produtos de ouro já presentes no sistema.
+const OURO_CNPJ_PROXY = '22.963.439/0001-52'
 
 // Spreads de fallback quando índice real não estiver disponível
 const SPREADS_FALLBACK_AA = {
@@ -86,13 +91,37 @@ function serieDiariaPassivoReal(db, serieDiario, datasReferencia, mesInicioStr, 
   ).all(serieDiario, mesInicioStr + '-01', mesFimStr + '-31')
   if (rows.length < 2) return null
 
+  // `rows` busca desde o 1º dia do mês (mesInicioStr) mesmo quando o período
+  // custom começa no meio do mês — necessário pra ter um nível/taxa de base
+  // pro primeiro dia de referência. Mas essas linhas anteriores a ela só podem
+  // servir de base, nunca compor no acumulado: senão o primeiro ponto do
+  // gráfico já nasceria deslocado (ex: início custom dia 12 acumulando CDI
+  // desde o dia 1º antes mesmo do primeiro ponto visível).
+  const primeiraData = datasReferencia[0]
+
   let acumulado = 1
-  let ultimoNivel = null
   let idx = 0
   const resultado = new Map()
+
+  // CDI_DIARIO guarda a taxa diária (% a.d.), não um nível de índice como as
+  // demais séries deste mapa — cada linha já É o retorno do dia. Tratá-la
+  // como nível (razão entre linhas consecutivas) confunde corte de juros
+  // (Copom) com perda de capital, gerando quedas artificiais no gráfico.
+  if (serieDiario === 'CDI_DIARIO') {
+    for (const data of datasReferencia) {
+      while (idx < rows.length && rows[idx].data <= data) {
+        if (rows[idx].data >= primeiraData) acumulado *= 1 + rows[idx].valor / 100
+        idx++
+      }
+      resultado.set(data, acumulado - 1)
+    }
+    return resultado
+  }
+
+  let ultimoNivel = null
   for (const data of datasReferencia) {
     while (idx < rows.length && rows[idx].data <= data) {
-      if (ultimoNivel != null) acumulado *= rows[idx].valor / ultimoNivel
+      if (ultimoNivel != null && rows[idx].data >= primeiraData) acumulado *= rows[idx].valor / ultimoNivel
       ultimoNivel = rows[idx].valor
       idx++
     }
@@ -101,14 +130,35 @@ function serieDiariaPassivoReal(db, serieDiario, datasReferencia, mesInicioStr, 
   return resultado
 }
 
+// Retorno de nível [inicio,fim] a partir de cotas_cache (produto real, ex: Trend Ouro) —
+// mesmo contrato de retornoNivelDiario, mas para séries que vivem em cotas_cache
+// em vez de dados_macro (ainda não temos uma série de índice de ouro dedicada).
+function retornoNivelCotaCache(identificador, inicio, fim, db) {
+  const v0 = db.prepare(
+    `SELECT cc.valor FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id
+     WHERE p.identificador = ? AND cc.data >= ? AND cc.data <= ? ORDER BY cc.data LIMIT 1`
+  ).get(identificador, inicio, fim)
+  const v1 = db.prepare(
+    `SELECT cc.valor FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id
+     WHERE p.identificador = ? AND cc.data >= ? AND cc.data <= ? ORDER BY cc.data DESC LIMIT 1`
+  ).get(identificador, inicio, fim)
+  if (!v0 || !v1 || v0.valor == null || v1.valor == null || v0.valor <= 0) return null
+  return v1.valor / v0.valor - 1
+}
+
 function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
   const mesData = mes + '-01'
 
-  if (cls === 'alternativos') return cdiMensal
+  if (cls === 'alternativos') {
+    const [ano, m] = mes.split('-').map(Number)
+    const ultimoDiaMes = new Date(ano, m, 0).toISOString().split('T')[0]
+    const ouro = retornoNivelCotaCache(OURO_CNPJ_PROXY, mesData, ultimoDiaMes, db)
+    return ouro != null ? ouro : cdiMensal
+  }
 
   if (cls === 'pos_fixado') {
     const debb = db.prepare(`SELECT valor FROM dados_macro WHERE serie='DEBB11_MENSAL' AND data=?`).get(mesData)
-    if (debb) return 0.7 * cdiMensal + 0.3 * (debb.valor / 100)
+    if (debb) return 0.6 * cdiMensal + 0.4 * (debb.valor / 100)
     return cdiMensal  // fallback: CDI puro antes de jun/2022
   }
 
@@ -919,30 +969,14 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const retornoAcumulado = acumulado - 1
   const retornoAcumuladoCDI = acumuladoCDI - 1
 
-  // CAGR
   const anos = retornosMensais.length / 12
   const cagr = Math.pow(acumulado, 1 / anos) - 1
-
-  // Volatilidade (desvio padrão mensal × √12)
-  const media = retornos.reduce((a, b) => a + b, 0) / retornos.length
-  const variancia = retornos.reduce((s, r) => s + Math.pow(r - media, 2), 0) / (retornos.length - 1)
-  const volMensal = Math.sqrt(variancia)
-  const volatilidade = volMensal * Math.sqrt(12)
-
-  // Sharpe
-  const cdiMedioMensal = retornosMensais.reduce((s, r) => s + (r.cdi || 0), 0) / retornosMensais.length
-  const sharpe = volMensal > 0 ? (media - cdiMedioMensal) / volMensal * Math.sqrt(12) : null
-
-  // Sortino — downside deviation padrão (Price/Sortino): divide por n_total, não por n_negativos
-  const retNeg = retornos.filter((r) => r < cdiMedioMensal)
-  const downDev = retNeg.length > 0
-    ? Math.sqrt(retNeg.reduce((s, r) => s + Math.pow(r - cdiMedioMensal, 2), 0) / retornos.length) * Math.sqrt(12)
-    : 0
-  // Numerador: excesso sobre CDI em base geométrica (evita misturar CAGR geométrico com CDI aritmético)
   const cagrCDI = Math.pow(acumuladoCDI, 1 / anos) - 1
-  const sortino = downDev > 0 ? (cagr - cagrCDI) / downDev : null
 
-  // Série diária: fonte de verdade para retorno_acumulado, CDI, Max Drawdown
+  // Série diária: fonte de verdade para retorno_acumulado, CDI, Max Drawdown e,
+  // abaixo, Volatilidade/Sharpe/Sortino — os retornos mensais inteiros vazam
+  // dias fora do período quando o início/fim customizado não cai em virada de
+  // mês (ex: início dia 12 ainda soma o mês inteiro desde o dia 1º).
   const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
   const ultimoDiario = serieDiaria?.at(-1)
 
@@ -953,6 +987,43 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const cagrFinal = serieDiaria?.length > 0
     ? Math.pow(1 + retornoFinal, 252 / serieDiaria.length) - 1
     : cagr
+  const cagrCDIFinal = serieDiaria?.length > 0
+    ? Math.pow(1 + retornoCDIFinal, 252 / serieDiaria.length) - 1
+    : cagrCDI
+
+  // Retornos diários (diferença consecutiva da série diária) — base de
+  // Volatilidade/Sharpe/Sortino quando disponível. Cai pro mensal só se a
+  // série diária não puder ser montada (ex: sem CDI_DIARIO no período).
+  const retornosDiarios = []
+  const cdiDiariosSerie = []
+  if (serieDiaria?.length > 1) {
+    for (let i = 1; i < serieDiaria.length; i++) {
+      retornosDiarios.push((1 + serieDiaria[i].retorno_acumulado) / (1 + serieDiaria[i - 1].retorno_acumulado) - 1)
+      cdiDiariosSerie.push((1 + serieDiaria[i].cdi_acumulado) / (1 + serieDiaria[i - 1].cdi_acumulado) - 1)
+    }
+  }
+  const usaDiario = retornosDiarios.length >= 2
+  const anualizador = usaDiario ? Math.sqrt(252) : Math.sqrt(12)
+  const retBase = usaDiario ? retornosDiarios : retornos
+  const cdiBase = usaDiario ? cdiDiariosSerie : retornosMensais.map((r) => r.cdi || 0)
+
+  // Volatilidade (desvio padrão anualizado)
+  const media = retBase.reduce((a, b) => a + b, 0) / retBase.length
+  const variancia = retBase.reduce((s, r) => s + Math.pow(r - media, 2), 0) / (retBase.length - 1)
+  const volPeriodo = Math.sqrt(variancia)
+  const volatilidade = volPeriodo * anualizador
+
+  // Sharpe
+  const cdiMedioPeriodo = cdiBase.reduce((a, b) => a + b, 0) / cdiBase.length
+  const sharpe = volPeriodo > 0 ? (media - cdiMedioPeriodo) / volPeriodo * anualizador : null
+
+  // Sortino — downside deviation padrão (Price/Sortino): divide por n_total, não por n_negativos
+  const retNeg = retBase.filter((r, i) => r < cdiBase[i])
+  const downDev = retNeg.length > 0
+    ? Math.sqrt(retNeg.reduce((s, r) => s + Math.pow(r - cdiMedioPeriodo, 2), 0) / retBase.length) * anualizador
+    : 0
+  // Numerador: excesso sobre CDI em base geométrica, já recortado ao período exato
+  const sortino = downDev > 0 ? (cagrFinal - cagrCDIFinal) / downDev : null
 
   // Max Drawdown calculado a partir da série diária (captura quedas intra-mês)
   let maxDD = 0
@@ -1121,9 +1192,15 @@ function calcularRetornosMensaisPorClasse(carteiraId, mesInicioStr, mesFimStr) {
     const inicioMes = `${aloc.mes}-01`
     const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
 
+    // Estados que cobrem esse mês por intervalo de datas (não pela tag `mes`,
+    // que só reflete o mês do rebalance — um estado tagueado 'jun' pode ter
+    // data_inicio em mai e seguir aberto até hoje, cobrindo jul/ago também).
+    // Mesmo padrão de calcularSerieDiaria, a engine que já calcula certo.
     const estados = db.prepare(
-      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
-    ).all(carteiraId, aloc.mes)
+      `SELECT * FROM estados_portfolio
+       WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+       ORDER BY data_inicio`
+    ).all(carteiraId, fimMes, inicioMes)
 
     const row = { mes: aloc.mes }
     for (const cls of CLASSES) {
@@ -1373,7 +1450,15 @@ export function calcularDadosExcel(carteiraId, dataInicio, dataFim) {
     const cdiRow = db.prepare("SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?").get(aloc.mes + '-01')
     const cdiMes = cdiRow ? cdiRow.valor / 100 : null
 
-    const estados = db.prepare(`SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ?`).all(carteiraId, aloc.mes)
+    // Estados que cobrem esse mês por intervalo de datas (não pela tag `mes`,
+    // que só reflete o mês do rebalance — um estado tagueado 'jun' pode ter
+    // data_inicio em mai e seguir aberto até hoje, cobrindo jul/ago também).
+    // Mesmo padrão de calcularSerieDiaria, a engine que já calcula certo.
+    const estados = db.prepare(
+      `SELECT * FROM estados_portfolio
+       WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+       ORDER BY data_inicio`
+    ).all(carteiraId, fimMes, inicioMes)
 
     let retornoCarteiraMes = 0
     const contribuicaoPorClasse = {}
@@ -2565,12 +2650,12 @@ const SERIE_DIARIA_CLASSE = {
   multimercado: 'IHFA_DIARIO',
 }
 function retornoBenchmarkPeriodo(cls, inicio, fim, db) {
-  if (cls === 'alternativos') return retornoCDIPeriodo(inicio, fim, db)
+  if (cls === 'alternativos') return retornoNivelCotaCache(OURO_CNPJ_PROXY, inicio, fim, db)
   if (cls === 'pos_fixado') {
     const cdi = retornoCDIPeriodo(inicio, fim, db)
     const debb = retornoNivelDiario('DEBB11_DIARIO', inicio, fim, db)
     if (cdi == null || debb == null) return null
-    return 0.7 * cdi + 0.3 * debb
+    return 0.6 * cdi + 0.4 * debb
   }
   const serie = SERIE_DIARIA_CLASSE[cls]
   return serie ? retornoNivelDiario(serie, inicio, fim, db) : null
@@ -2580,115 +2665,251 @@ function retornoBenchmarkPeriodo(cls, inicio, fim, db) {
 
 export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
   const db = getDb()
-  const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
+  const carteira = db.prepare(
+    `SELECT c.*, p.id as perfil_id FROM carteiras c JOIN perfis p ON c.perfil_id = p.id WHERE c.id = ?`
+  ).get(carteiraId)
   if (!carteira) return null
 
-  const mesInicioStr = dataInicio?.slice(0, 7) || '2020-01'
-  const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
-
-  const alocacoes = getAlocacoesExtendidas(db, carteira.perfil_id, carteiraId, mesInicioStr, mesFimStr)
-  if (alocacoes.length === 0) return null
+  // Mesmo default de calcularMetricas para o preset "Início"
+  const primeiroEstado = !dataInicio
+    ? db.prepare(
+        `SELECT MIN(data_inicio) as data_inicio FROM estados_portfolio WHERE carteira_id = ?`
+      ).get(carteiraId)
+    : null
+  const inicioStr = dataInicio || primeiroEstado?.data_inicio || '2020-01-01'
+  const fimStr = dataFim || new Date().toISOString().split('T')[0]
 
   const CLASSES = LABELS_CLASSE
+  const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
 
-  // Acumuladores por classe
+  const estados = db.prepare(`
+    SELECT * FROM estados_portfolio
+    WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+    ORDER BY data_inicio
+  `).all(carteiraId, fimStr, inicioStr)
+  if (!estados.length) return null
+
+  const estadoIds = estados.map((e) => e.id)
+  const phE = estadoIds.map(() => '?').join(',')
+  const todosProds = db.prepare(`SELECT * FROM produtos WHERE estado_id IN (${phE})`).all(...estadoIds)
+  const prodsByEstado = new Map()
+  for (const p of todosProds) {
+    if (!prodsByEstado.has(p.estado_id)) prodsByEstado.set(p.estado_id, [])
+    prodsByEstado.get(p.estado_id).push(p)
+  }
+
+  const identifiers = [...new Set(
+    todosProds.filter((p) => (p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador)
+              .map((p) => p.identificador)
+  )]
+
+  const bufferInicio = new Date(inicioStr + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+  const cotasMapByIdent = new Map()
+  if (identifiers.length) {
+    const ph2 = identifiers.map(() => '?').join(',')
+    const rows = db.prepare(`
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
+      FROM cotas_cache cc
+      JOIN produtos p ON cc.produto_id = p.id
+      WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
+      GROUP BY p.identificador, cc.data
+      ORDER BY p.identificador, cc.data
+    `).all(...identifiers, bufferStr, fimStr)
+    for (const r of rows) {
+      if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado ?? r.valor)
+    }
+  }
+
+  const cdiRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(inicioStr, fimStr)
+  if (!cdiRows.length) return null
+  const cdiByData = new Map(cdiRows.map((r) => [r.data, r.valor / 100]))
+  const diasUteis = cdiRows.map((r) => r.data)
+
+  // Dia útil anterior ao período: base do benchmark do 1º dia, para casar com o
+  // retorno do 1º dia da carteira (que vem da última cota conhecida antes do início)
+  const diaAntesInicio = db.prepare(
+    `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data < ? ORDER BY data DESC LIMIT 1`
+  ).get(inicioStr)?.data ?? inicioStr
+
+  const mesIniStr = inicioStr.slice(0, 7)
+  const mesFimStr = fimStr.slice(0, 7)
+
+  const ipcaRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(mesIniStr + '-01', mesFimStr + '-01')
+  const ipcaByMes = new Map(ipcaRows.map((r) => [r.data.slice(0, 7), r.valor / 100]))
+
+  const cdiMesRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(mesIniStr + '-01', mesFimStr + '-01')
+  const cdiByMes = new Map(cdiMesRows.map((r) => [r.data.slice(0, 7), r.valor / 100]))
+
+  const alocRows = db.prepare(
+    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes <= ? ORDER BY mes`
+  ).all(carteira.perfil_id, mesFimStr)
+  const alocByMes = new Map(alocRows.map((a) => [a.mes, a]))
+
+  function getAloc(mes) {
+    if (alocByMes.has(mes)) return alocByMes.get(mes)
+    const ant = [...alocByMes.keys()].filter((m) => m <= mes).sort()
+    return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
+  }
+
+  const subCarteirasIds = [...new Set(
+    todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
+  )]
+  const subRetDiario = new Map()
+  if (subCarteirasIds.length > 0) {
+    const mesesNoPeriodo = [...new Set(diasUteis.map((d) => d.slice(0, 7)))]
+    for (const mes of mesesNoPeriodo) {
+      const [y, m] = mes.split('-').map(Number)
+      const inicioMes = `${mes}-01`
+      const fimMes = new Date(y, m, 0).toISOString().split('T')[0]
+      const diasDoMes = diasUteis.filter((d) => d.slice(0, 7) === mes).length
+      if (diasDoMes === 0) continue
+      for (const subId of subCarteirasIds) {
+        const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
+        if (retMensal != null) {
+          const base = 1 + retMensal
+          subRetDiario.set(`${subId}_${mes}`, base > 0 ? Math.pow(base, 1 / diasDoMes) - 1 : 0)
+        }
+      }
+    }
+  }
+
+  const ultimaCota = new Map()
+  for (const [ident, cotasMap] of cotasMapByIdent) {
+    const antes = [...cotasMap.keys()].filter((d) => d < inicioStr).sort()
+    if (antes.length) ultimaCota.set(ident, cotasMap.get(antes[antes.length - 1]))
+  }
+
+  function getEstado(dia) {
+    let ativo = null
+    for (const e of estados) {
+      if (e.data_inicio > dia) break
+      if (!e.data_fim || e.data_fim >= dia) ativo = e
+    }
+    return ativo
+  }
+
+  // Dias úteis do MÊS INTEIRO (não só os do período): mantém o benchmark de
+  // fallback pro-rata nos meses de borda parciais.
+  const duMesCache = new Map()
+  function diasUteisDoMes(mes) {
+    if (!duMesCache.has(mes)) {
+      const [y, m] = mes.split('-').map(Number)
+      duMesCache.set(mes, contarDiasUteis(`${mes}-01`, new Date(y, m, 0).toISOString().split('T')[0], db))
+    }
+    return duMesCache.get(mes)
+  }
+
+  function benchmarkDoDia(cls, diaAnterior, dia, mes) {
+    // CDI é série de TAXA (o valor do dia já é o retorno do dia); as demais são
+    // séries de NÍVEL e precisam da janela [diaAnterior, dia]. Trend Ouro (alternativos)
+    // é uma cota real em cotas_cache, então já é nível — cai no caso genérico
+    // via retornoBenchmarkPeriodo, igual IBOV/IMAB/etc.
+    let exato
+    if (cls === 'pos_fixado') {
+      const cdi = cdiByData.get(dia)
+      const debb = retornoNivelDiario('DEBB11_DIARIO', diaAnterior, dia, db)
+      exato = (cdi != null && debb != null) ? 0.6 * cdi + 0.4 * debb : null
+    } else {
+      exato = retornoBenchmarkPeriodo(cls, diaAnterior, dia, db)
+    }
+    if (exato != null) return exato
+    const mensal = getBenchmarkMensalClasse(cls, cdiByMes.get(mes) ?? 0, ipcaByMes.get(mes) ?? 0, mes, db)
+    const du = diasUteisDoMes(mes)
+    const base = 1 + (mensal ?? 0)
+    return base > 0 && du > 0 ? Math.pow(base, 1 / du) - 1 : 0
+  }
+
   const acumClasse = {}
   for (const cls of Object.keys(CLASSES)) {
     acumClasse[cls] = { retorno: 1, benchmark: 1, contribuicao_acum: 0, peso_medio: 0, n: 0 }
   }
-
-  // Acumuladores por ativo: chave = "nome__identificador__classe"
   const acumAtivo = {}
 
-  let retornoTotal = 1
+  let diaAnterior = diaAntesInicio
 
-  for (const aloc of alocacoes) {
-    const estados = db.prepare(
-      `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND mes = ? ORDER BY data_inicio`
-    ).all(carteiraId, aloc.mes)
+  for (const dia of diasUteis) {
+    const cdiDiario = cdiByData.get(dia) ?? 0
+    const estado = getEstado(dia)
+    const mes = dia.slice(0, 7)
+    const aloc = getAloc(mes)
+    const filteredIdents = new Set()
 
-    const [ano, m] = aloc.mes.split('-').map(Number)
-    const primeiroDiaMes = `${aloc.mes}-01`
-    const ultimoDiaMes = new Date(ano, m, 0).toISOString().split('T')[0]
-    // Clipa as bordas ao período selecionado: o primeiro e o último mês podem
-    // ser parciais. Sem isso, a atribuição soma sempre meses inteiros.
-    const inicioMes = (dataInicio && dataInicio > primeiroDiaMes) ? dataInicio : primeiroDiaMes
-    const fimMes = (dataFim && dataFim < ultimoDiaMes) ? dataFim : ultimoDiaMes
-
-    // Macro do mês
-    const cdiRow = db.prepare(
-      "SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?"
-    ).get(aloc.mes + '-01')
-    const ipcaRow = db.prepare(
-      "SELECT valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data=?"
-    ).get(aloc.mes + '-01')
-    const cdiMensal = cdiRow ? cdiRow.valor / 100 : 0
-    const ipcaMensal = ipcaRow ? ipcaRow.valor / 100 : 0
-
-    // Mês de borda parcial? (primeiro/último mês clipado ao período)
-    const mesParcial = inicioMes !== primeiroDiaMes || fimMes !== ultimoDiaMes
-    const duMes = mesParcial ? contarDiasUteis(primeiroDiaMes, ultimoDiaMes, db) : 0
-    const duJanela = mesParcial ? contarDiasUteis(inicioMes, fimMes, db) : 0
-
-    // Um produto que persiste em 2 estados do mesmo mês (rebalance no meio do
-    // mês) só pode ter o benchmark do mês aplicado UMA vez — benchmarkMes já
-    // é o valor do mês inteiro, não decomposto por sub-período (diferente de
-    // retorno_acum, que compõe corretamente por sub-período abaixo).
-    const benchmarkAplicado = new Set()
-    // Soma as contribuições de cada classe do mês; retornoTotal compõe UMA VEZ
-    // por mês (abaixo, fora do loop de classes) — multiplicar retornoTotal a
-    // cada classe (bug anterior) introduzia termos cruzados espúrios entre
-    // classes paralelas do mesmo mês, divergindo do retorno oficial de
-    // calcularRetornoEstado (que soma retornoClasse*pesoClasse, não compõe).
-    let retornoMesAcum = 0
-
-    for (const cls of Object.keys(CLASSES)) {
-      const pesoClasse = (aloc[cls] || 0) / 100
-      if (pesoClasse === 0) continue
-
-      // Mês cheio: benchmark mensal. Mês parcial: usa série diária (exato);
-      // sem série diária (rf_global/rv_global, IHFA além da cobertura) → pro-rata por dias úteis.
-      let benchmarkMes
-      if (!mesParcial) {
-        benchmarkMes = getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, aloc.mes, db)
-      } else {
-        const exato = retornoBenchmarkPeriodo(cls, inicioMes, fimMes, db)
-        if (exato != null) {
-          benchmarkMes = exato
-        } else {
-          const cheio = getBenchmarkMensalClasse(cls, cdiMensal, ipcaMensal, aloc.mes, db)
-          benchmarkMes = duMes > 0 ? cheio * (duJanela / duMes) : cheio
-        }
+    if (estado && aloc) {
+      const prods = prodsByEstado.get(estado.id) || []
+      const classeMap = {}
+      for (const p of prods) {
+        if (!classeMap[p.classe]) classeMap[p.classe] = []
+        classeMap[p.classe].push(p)
       }
 
-      // Composição sequencial por sub-período de cada estado dentro do mês —
-      // mesmo padrão de calcularRetornoMes. Evita computar o retorno do mês
-      // inteiro duas vezes quando um produto persiste em 2 estados (rebalance
-      // no meio do mês): cada estado contribui só com sua própria janela.
-      let retornoClasseAcum = 1
-      for (const est of estados) {
-        const estIni = est.data_inicio > inicioMes ? est.data_inicio : inicioMes
-        const estFim = est.data_fim && est.data_fim < fimMes ? est.data_fim : fimMes
-        if (estIni > estFim) continue
+      for (const cls of Object.keys(CLASSES)) {
+        const pesoClasse = (aloc[cls] ?? 0) / 100
+        if (!pesoClasse) continue
 
-        const prods = db.prepare(
-          `SELECT * FROM produtos WHERE estado_id = ? AND classe = ?`
-        ).all(est.id, cls)
-        if (prods.length === 0) continue
+        const classeProds = classeMap[cls] || []
+        const retsPorProd = classeProds.map((p) => {
+          let retP = null
 
-        const retsPorProdAtrib = prods.map(p => ({ p, ret: calcularRetornoProduto(p, estIni, estFim) }))
-        const pesoComDadosAtrib = retsPorProdAtrib.reduce((s, { p, ret }) => ret != null ? s + (p.peso || 0) : s, 0)
-        let retornoSubPeriodo = 0
+          if (p.tipo === 'rf_curva') {
+            const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = p
+            if ((data_vencimento && dia > data_vencimento) || (data_emissao && dia < data_emissao)) {
+              retP = 0
+            } else if (indexador === 'PRE') {
+              retP = Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'CDI') {
+              retP = tipo_cdi === 'pct'
+                ? cdiDiario * (taxa / 100)
+                : cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'IPCA') {
+              const ipcaMensal = ipcaByMes.get(mes) ?? 0.005
+              retP = (Math.pow(1 + ipcaMensal, 1 / 21) - 1) + (Math.pow(1 + taxa / 100, 1 / 252) - 1)
+            }
+            if (retP !== null && isento_ir) retP /= (1 - 0.15)
 
-        for (const { p, ret } of retsPorProdAtrib) {
-          const pesoNorm = (p.peso || 0) / (pesoComDadosAtrib || 1)
-          if (ret != null) retornoSubPeriodo += ret * pesoNorm
+          } else if ((p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador) {
+            const cotasMap = cotasMapByIdent.get(p.identificador)
+            if (cotasMap) {
+              const valorHoje = cotasMap.get(dia)
+              const valorAntes = ultimaCota.get(p.identificador)
+              if (valorHoje && valorAntes && valorAntes > 0) {
+                const raw = valorHoje / valorAntes - 1
+                if (Math.abs(raw) <= 0.40) retP = raw
+                else filteredIdents.add(p.identificador)
+              }
+            }
+          } else if (p.tipo === 'carteira' && p.identificador) {
+            const retDiarioSub = subRetDiario.get(`${p.identificador}_${mes}`)
+            if (retDiarioSub != null) retP = retDiarioSub
+          }
 
-          // Acumular por ativo — normaliza tickers renomeados para o nome canônico
-          if (!p.identificador) continue  // produto sem identificador não pode ser rastreado individualmente
-          const TICKER_CANONICAL = { 'CVBI11': 'PCIP11' }
-          const canonicalId = TICKER_CANONICAL[p.identificador] ?? p.identificador
-          const ativoKey = `${canonicalId}__${cls}`
+          return { p, retP }
+        })
+
+        const pesoComDados = retsPorProd.reduce((s, { p, retP }) => retP != null ? s + (p.peso || 0) : s, 0)
+        let retClasse = 0
+        for (const { p, retP } of retsPorProd) {
+          if (retP !== null) retClasse += retP * ((p.peso || 0) / (pesoComDados || 1))
+        }
+
+        const benchDia = benchmarkDoDia(cls, diaAnterior, dia, mes)
+
+        for (const { p, retP } of retsPorProd) {
+          const canonicalId = p.identificador ? (TICKER_CANONICAL[p.identificador] ?? p.identificador) : null
+          // RF na curva (Tesouro/CDB/LCA/CRI/CRA/debênture) não tem CNPJ nem ticker —
+          // usa nome+termos como chave, únicos o bastante pra identificar a posição
+          // e mesclar a mesma ao longo dos meses (igual identificador faz pros demais).
+          const ativoKey = canonicalId
+            ? `${canonicalId}__${cls}`
+            : `${p.nome}|${p.indexador}|${p.taxa}|${p.data_vencimento}__${cls}`
           if (!acumAtivo[ativoKey]) {
             acumAtivo[ativoKey] = {
               nome: p.nome || canonicalId,
@@ -2702,6 +2923,8 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
               peso_classe_medio: 0,
               n: 0,
               sem_dados: false,
+              meses: new Set(),
+              meses_com_dados: new Set(),
               indexador: p.indexador,
               tipo_cdi: p.tipo_cdi,
               taxa: p.taxa,
@@ -2710,41 +2933,52 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
             }
           }
           const a = acumAtivo[ativoKey]
-          // Atualiza campos de duration com os valores mais recentes do ativo
           a.indexador = p.indexador
           a.tipo_cdi = p.tipo_cdi
           a.taxa = p.taxa
           a.data_vencimento = p.data_vencimento
           a.duration_manual = p.duration_manual
-          if (ret != null) {
-            a.retorno_acum *= (1 + ret)
-            a.contribuicao_total += ret * pesoNorm * pesoClasse
-          } else {
-            a.sem_dados = true
+
+          const pesoNorm = (p.peso || 0) / (pesoComDados || 1)
+          a.meses.add(mes)
+          if (retP != null) {
+            a.retorno_acum *= (1 + retP)
+            a.contribuicao_total += retP * pesoNorm * pesoClasse
+            a.meses_com_dados.add(mes)
+            // Peso médio só conta dias com dado: em dia sem cotação o produto sai
+            // do denominador da renormalização e pesoNorm ficaria inflado
+            a.peso_portfolio_medio += pesoNorm * pesoClasse
+            a.peso_classe_medio += pesoNorm
+            a.n++
           }
-          if (!benchmarkAplicado.has(ativoKey)) {
-            a.benchmark_acum *= (1 + benchmarkMes)
-            benchmarkAplicado.add(ativoKey)
-          }
-          a.peso_portfolio_medio += pesoNorm * pesoClasse
-          a.peso_classe_medio += pesoNorm
-          a.n++
+          a.benchmark_acum *= (1 + benchDia)
         }
 
-        retornoClasseAcum *= (1 + retornoSubPeriodo)
+        acumClasse[cls].retorno *= (1 + retClasse)
+        acumClasse[cls].benchmark *= (1 + benchDia)
+        acumClasse[cls].contribuicao_acum += retClasse * pesoClasse
+        acumClasse[cls].peso_medio += pesoClasse
+        acumClasse[cls].n++
       }
-      const retornoClasse = retornoClasseAcum - 1
-
-      acumClasse[cls].retorno *= (1 + retornoClasse)
-      acumClasse[cls].benchmark *= (1 + benchmarkMes)
-      acumClasse[cls].contribuicao_acum += retornoClasse * pesoClasse
-      acumClasse[cls].peso_medio += pesoClasse
-      acumClasse[cls].n++
-      retornoMesAcum += retornoClasse * pesoClasse
     }
 
-    retornoTotal *= (1 + retornoMesAcum)
+    for (const [ident, cotasMap] of cotasMapByIdent) {
+      const v = cotasMap.get(dia)
+      if (v !== undefined && v > 0 && !filteredIdents.has(ident)) ultimaCota.set(ident, v)
+    }
+    diaAnterior = dia
   }
+
+  // sem_dados na mesma granularidade do modelo mensal anterior: mês inteiro sem
+  // nenhuma cotação. Buracos de um dia não invalidam o retorno — a cota seguinte
+  // captura o intervalo todo via ultimaCota.
+  for (const a of Object.values(acumAtivo)) {
+    a.sem_dados = [...a.meses].some((m) => !a.meses_com_dados.has(m))
+  }
+
+  // retorno_total vem da série diária — mesma fonte de verdade da aba Retorno
+  const serieDiaria = calcularSerieDiaria(carteiraId, inicioStr, fimStr)
+  const retornoTotal = serieDiaria?.at(-1)?.retorno_acumulado ?? 0
 
   const hoje = new Date().toISOString().split('T')[0]
 
@@ -2802,5 +3036,5 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     }
   }).filter((c) => c.peso > 0 || c.retorno !== 0)
 
-  return { classes, retorno_total: retornoTotal - 1 }
+  return { classes, retorno_total: retornoTotal }
 }
