@@ -5,13 +5,15 @@ import { downloadToFile, registrarLog } from './external.js'
 
 // Feeds disponíveis. As URLs ficam em `configuracoes` (chave abaixo) e são
 // tratadas como sensíveis em routes/config.js (são tokens de acesso).
-// `fundos` fica para a Fase 2 (precisa de ponte nome↔CNPJ + URL corrigida).
+// `fundos` identifica cada linha pelo código Economatica (não pelo CNPJ usado
+// em produtos.identificador) — a ponte código↔CNPJ vem de economatica_fundos_depara.
 const FEEDS = [
   { feed: 'acoes',     chave: 'economatica_url_acoes',     tipo: 'ativos' },
   { feed: 'fiis',      chave: 'economatica_url_fiis',      tipo: 'ativos' },
   { feed: 'etfs',      chave: 'economatica_url_etfs',      tipo: 'ativos' },
   { feed: 'indices',   chave: 'economatica_url_indices',   tipo: 'indices' },
   { feed: 'papeis_rf', chave: 'economatica_url_papeis_rf', tipo: 'papeis_rf' },
+  { feed: 'fundos',    chave: 'economatica_url_fundos',    tipo: 'fundos' },
 ]
 
 // Nome do índice no feed (após strip do sufixo) → série em dados_macro.
@@ -219,10 +221,51 @@ async function importarPapeisRF(db, filePath) {
   }, flush)
 }
 
+// Fundos → cotas_cache, fonte economatica e imutável. O feed identifica cada
+// linha pelo código Economatica (ex: 593125<BraNa>), não pelo CNPJ usado em
+// produtos.identificador — a ponte vem de economatica_fundos_depara.
+async function importarFundos(db, filePath) {
+  // código Economatica → CNPJ (normalizado, só dígitos)
+  const codigoCnpj = new Map()
+  for (const r of db.prepare(`SELECT codigo, cnpj FROM economatica_fundos_depara`).all()) {
+    codigoCnpj.set(r.codigo, r.cnpj)
+  }
+
+  // CNPJ (normalizado) → todos os produto_ids de fundos
+  const cnpjProdutos = new Map()
+  for (const p of db.prepare(`SELECT identificador, id FROM produtos WHERE tipo = 'fundo' AND identificador IS NOT NULL`).all()) {
+    const k = p.identificador.replace(/\D/g, '')
+    if (!k) continue
+    if (!cnpjProdutos.has(k)) cnpjProdutos.set(k, [])
+    cnpjProdutos.get(k).push(p.id)
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO cotas_cache (produto_id, data, valor, valor_ajustado, fonte)
+    VALUES (?, ?, ?, NULL, 'economatica')
+    ON CONFLICT(produto_id, data) DO UPDATE SET
+      valor          = excluded.valor,
+      valor_ajustado = NULL,
+      fonte          = 'economatica'
+  `)
+  const flush = db.transaction((rows) => { for (const r of rows) stmt.run(r.pid, r.data, r.valor) })
+
+  return processarArquivo(filePath, (p) => {
+    if (p.valor <= 0) return null
+    const codigo = stripSufixo(p.ativo)
+    const cnpj = codigoCnpj.get(codigo)
+    if (!cnpj) return null
+    const pids = cnpjProdutos.get(cnpj)
+    if (!pids) return null
+    return pids.map((pid) => ({ pid, data: p.data, valor: p.valor }))
+  }, flush)
+}
+
 export function importarPorTipo(db, tipo, filePath) {
   if (tipo === 'ativos')    return importarAtivos(db, filePath)
   if (tipo === 'indices')   return importarIndices(db, filePath)
   if (tipo === 'papeis_rf') return importarPapeisRF(db, filePath)
+  if (tipo === 'fundos')    return importarFundos(db, filePath)
   throw new Error(`tipo de feed desconhecido: ${tipo}`)
 }
 

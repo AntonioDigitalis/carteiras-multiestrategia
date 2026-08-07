@@ -167,6 +167,17 @@ CREATE TABLE IF NOT EXISTS economatica_papeis_rf (
   valor REAL NOT NULL,
   PRIMARY KEY (ativo, data)
 );
+
+-- Ponte código Economatica ↔ CNPJ para o feed de fundos (o feed identifica
+-- fundos pelo código, não pelo CNPJ usado em produtos.identificador).
+-- Carregada a partir do cadastro exportado da Economatica.
+CREATE TABLE IF NOT EXISTS economatica_fundos_depara (
+  codigo TEXT PRIMARY KEY,
+  cnpj   TEXT NOT NULL,
+  nome   TEXT,
+  status TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fundos_depara_cnpj ON economatica_fundos_depara(cnpj);
 `
 
 export const SEED = `
