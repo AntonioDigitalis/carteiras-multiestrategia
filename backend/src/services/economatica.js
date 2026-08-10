@@ -159,6 +159,14 @@ function processarArquivo(filePath, onRow, flush) {
 }
 
 // Ativos (acoes/fiis/etfs) → cotas_cache, fonte economatica e imutável.
+// Tickers do feed de ativos que também servem de proxy de benchmark (não são
+// posição de nenhuma carteira, então o loop abaixo os ignoraria por completo)
+// — precisam existir em dados_macro como série _DIARIO. Ex: DEBB11 é o proxy
+// do IDA-DI usado no benchmark de pos_fixado (60% CDI + 40% IDA-DI).
+const ETF_BENCHMARK_DIARIO = {
+  DEBB11: 'DEBB11_DIARIO',
+}
+
 async function importarAtivos(db, filePath) {
   // ticker (identificador) → todos os produto_ids
   const tickerProdutos = new Map()
@@ -178,15 +186,28 @@ async function importarAtivos(db, filePath) {
       valor_ajustado = NULL,
       fonte          = 'economatica'
   `)
+  const stmtMacro = db.prepare(`
+    INSERT INTO dados_macro (serie, data, valor, fonte)
+    VALUES (?, ?, ?, 'economatica')
+    ON CONFLICT(serie, data) DO UPDATE SET valor = excluded.valor, fonte = 'economatica'
+  `)
   const flush = db.transaction((rows) => { for (const r of rows) stmt.run(r.pid, r.data, r.valor) })
+  const benchmarkRows = []
 
-  return processarArquivo(filePath, (p) => {
+  const n = await processarArquivo(filePath, (p) => {
     if (p.valor <= 0) return null
     const ticker = stripSufixo(p.ativo)
+    const serieMacro = ETF_BENCHMARK_DIARIO[ticker]
+    if (serieMacro) benchmarkRows.push({ serie: serieMacro, data: p.data, valor: p.valor })
     const pids = tickerProdutos.get(ticker)
     if (!pids) return null
     return pids.map((pid) => ({ pid, data: p.data, valor: p.valor }))
   }, flush)
+
+  if (benchmarkRows.length) {
+    db.transaction(() => { for (const r of benchmarkRows) stmtMacro.run(r.serie, r.data, r.valor) })()
+  }
+  return n
 }
 
 // Índices → dados_macro séries *_DIARIO (níveis), fonte economatica imutável.
