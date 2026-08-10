@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS alertas_auditoria (
   titulo TEXT NOT NULL,
   descricao TEXT,
   ativo TEXT,                    -- nome/identificador do ativo
-  produto_id INTEGER REFERENCES produtos(id),
+  produto_id INTEGER REFERENCES produtos(id) ON DELETE CASCADE,
   data TEXT,
   valor_bruto TEXT,
   valor_usado TEXT,

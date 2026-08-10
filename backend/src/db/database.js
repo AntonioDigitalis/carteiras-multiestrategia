@@ -195,6 +195,46 @@ function runMigrations(db) {
     markRun('add_performance_indexes')
     console.log('[DB] Migração: índices de performance adicionados.')
   }
+
+  // Migração: alertas_auditoria.produto_id não tinha ON DELETE, então excluir
+  // um produto que já gerou algum alerta (ex: cota travada) falhava com
+  // "FOREIGN KEY constraint failed". CASCADE: os alertas são avisos
+  // operacionais sobre um produto presente na carteira (cota travada, split,
+  // retorno anômalo) — sem o produto, o alerta não tem mais referência útil.
+  if (!hasRun('alertas_auditoria_fk_cascade')) {
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE alertas_auditoria_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo TEXT NOT NULL CHECK(tipo IN ('error', 'warning', 'info')),
+        categoria TEXT NOT NULL,
+        titulo TEXT NOT NULL,
+        descricao TEXT,
+        ativo TEXT,
+        produto_id INTEGER REFERENCES produtos(id) ON DELETE CASCADE,
+        data TEXT,
+        valor_bruto TEXT,
+        valor_usado TEXT,
+        status TEXT NOT NULL DEFAULT 'ativo' CHECK(status IN ('ativo', 'revisado', 'ignorar')),
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO alertas_auditoria_new
+        (id, tipo, categoria, titulo, descricao, ativo, produto_id, data,
+         valor_bruto, valor_usado, status, created_at, updated_at)
+      SELECT
+        id, tipo, categoria, titulo, descricao, ativo, produto_id, data,
+        valor_bruto, valor_usado, status, created_at, updated_at
+      FROM alertas_auditoria;
+
+      DROP TABLE alertas_auditoria;
+      ALTER TABLE alertas_auditoria_new RENAME TO alertas_auditoria;
+    `)
+    db.pragma('foreign_keys = ON')
+    markRun('alertas_auditoria_fk_cascade')
+    console.log('[DB] Migração: alertas_auditoria.produto_id agora usa ON DELETE CASCADE.')
+  }
 }
 
 export function getDb() {
