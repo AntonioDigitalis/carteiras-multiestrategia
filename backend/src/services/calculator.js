@@ -69,7 +69,7 @@ const SERIE_DIARIA_POR_MENSAL = {
 // capture (calcularMetricas) quanto para a série diária real (calcularPassiva).
 function getSingleBenchmarkSerie(carteira, alocacoes) {
   if (carteira.benchmark_override) {
-    return { serieMensal: carteira.benchmark_override, label: carteira.benchmark_override.replace('_MENSAL', '') }
+    return { serieMensal: carteira.benchmark_override, label: carteira.benchmark_override.replace('_MENSAL', ''), classe: null }
   }
   const classes = Object.keys(LABELS_CLASSE)
   const pesoMedioClasse = {}
@@ -77,7 +77,7 @@ function getSingleBenchmarkSerie(carteira, alocacoes) {
     pesoMedioClasse[cls] = alocacoes.reduce((s, a) => s + (a[cls] || 0), 0) / Math.max(alocacoes.length, 1)
   const classeDOM = classes.find((cls) => pesoMedioClasse[cls] > 50)
   if (classeDOM && BENCHMARK_POR_CLASSE[classeDOM]) {
-    return { serieMensal: BENCHMARK_POR_CLASSE[classeDOM].serie, label: BENCHMARK_POR_CLASSE[classeDOM].label }
+    return { serieMensal: BENCHMARK_POR_CLASSE[classeDOM].serie, label: BENCHMARK_POR_CLASSE[classeDOM].label, classe: classeDOM }
   }
   return null
 }
@@ -331,23 +331,16 @@ function calcularRetornoSubCarteira(subCarteiraId, dataInicio, dataFim) {
   const subCarteira = db.prepare('SELECT perfil_id FROM carteiras WHERE id = ?').get(subCarteiraId)
   if (!subCarteira) return null
 
-  const mesInicio = dataInicio.slice(0, 7)
   const mesFim = dataFim.slice(0, 7)
 
-  let estados = db.prepare(`
+  // Por intervalo de data, não pela tag `mes` (que só reflete o mês do
+  // rebalance) — um estado tagueado num mês anterior pode seguir aberto e
+  // cobrir todo o período pedido. Mesmo padrão de calcularSerieDiaria.
+  const estados = db.prepare(`
     SELECT * FROM estados_portfolio
-    WHERE carteira_id = ? AND mes >= ? AND mes <= ?
+    WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
     ORDER BY data_inicio
-  `).all(subCarteiraId, mesInicio, mesFim)
-
-  // Fallback: estado aberto do mês anterior cobrindo este período (ex: último mes='2026-04' com data_fim=NULL cobrindo maio/2026)
-  if (estados.length === 0) {
-    estados = db.prepare(`
-      SELECT * FROM estados_portfolio
-      WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
-      ORDER BY data_inicio
-    `).all(subCarteiraId, dataFim, dataInicio)
-  }
+  `).all(subCarteiraId, dataFim, dataInicio)
 
   if (estados.length === 0) return null
 
@@ -769,28 +762,23 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
   }
 
-  // Pré-computa retornos diários de sub-carteiras (tipo='carteira') por mês
-  // Distribui o retorno mensal geometricamente pelos dias úteis do mês
+  // Pré-computa a série diária real de cada sub-carteira (tipo='carteira') —
+  // usa o mesmo motor diário (calcularSerieDiaria), não mais o retorno mensal
+  // de calcularRetornoEstado espalhado pelos dias do mês. Esse espalhamento,
+  // além de achatar a volatilidade, buscava estados pela tag `mes` (não por
+  // intervalo de data) e podia divergir bastante do retorno real da
+  // sub-carteira quando ela tinha mais de um estado por mês ou meses sem
+  // estado próprio — mesmo padrão de bug já corrigido em outras funções.
   const subCarteirasIds = [...new Set(
     todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
   )]
-  const subRetDiario = new Map() // key: `${subId}_${mes}` → retorno diário geométrico
-  if (subCarteirasIds.length > 0) {
-    const mesesNoPeriodo = [...new Set(diasUteis.map((d) => d.slice(0, 7)))]
-    for (const mes of mesesNoPeriodo) {
-      const [y, m] = mes.split('-').map(Number)
-      const inicioMes = `${mes}-01`
-      const fimMes = new Date(y, m, 0).toISOString().split('T')[0]
-      const diasDoMes = diasUteis.filter((d) => d.slice(0, 7) === mes).length
-      if (diasDoMes === 0) continue
-      for (const subId of subCarteirasIds) {
-        const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
-        if (retMensal != null) {
-          const base = 1 + retMensal
-          // base <= 0 ocorre se a sub-carteira perdeu 100%+; Math.pow de negativo dá NaN
-          subRetDiario.set(`${subId}_${mes}`, base > 0 ? Math.pow(base, 1 / diasDoMes) - 1 : 0)
-        }
-      }
+  const subRetDiario = new Map() // key: `${subId}_${data}` → retorno diário real
+  for (const subId of subCarteirasIds) {
+    const serieSub = calcularSerieDiaria(Number(subId), dataInicio, dataFim)
+    if (!serieSub?.length) continue
+    for (let i = 1; i < serieSub.length; i++) {
+      const ret = (1 + serieSub[i].retorno_acumulado) / (1 + serieSub[i - 1].retorno_acumulado) - 1
+      subRetDiario.set(`${subId}_${serieSub[i].data}`, ret)
     }
   }
 
@@ -806,7 +794,11 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
     let ativo = null
     for (const e of estados) {
       if (e.data_inicio > dia) break
-      if (!e.data_fim || e.data_fim >= dia) ativo = e
+      // Não descarta por data_fim ultrapassada: um gap entre o fim de um
+      // estado e o início do próximo (falha de publicação, não intenção de
+      // ficar sem posição) herda o último estado conhecido, em vez de zerar
+      // o retorno do dia enquanto o CDI de comparação segue acumulando.
+      ativo = e
     }
     return ativo
   }
@@ -878,7 +870,7 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
               }
             }
           } else if (p.tipo === 'carteira' && p.identificador) {
-            const retDiarioSub = subRetDiario.get(`${p.identificador}_${dia.slice(0, 7)}`)
+            const retDiarioSub = subRetDiario.get(`${p.identificador}_${dia}`)
             if (retDiarioSub != null) retP = retDiarioSub
           }
 
@@ -1361,10 +1353,39 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
     const ativoByData = new Map(ativoSerieDiaria.map((p) => [p.data, p.retorno_acumulado]))
 
     const benchmarkUnico = getSingleBenchmarkSerie(carteira, alocacoes)
-    const serieDiarioReal = benchmarkUnico && SERIE_DIARIA_POR_MENSAL[benchmarkUnico.serieMensal]
-    const passivoReal = serieDiarioReal
-      ? serieDiariaPassivoReal(db, serieDiarioReal, datasReferencia, mesInicioStr, mesFimStr)
-      : null
+    // pos_fixado e alternativos têm fórmula própria (60% CDI + 40% IDA-DI;
+    // ouro), não uma única série de nível — SERIE_DIARIA_CLASSE cobre as demais.
+    const classeTemDiarioReal = benchmarkUnico?.classe && (
+      benchmarkUnico.classe === 'pos_fixado' ||
+      benchmarkUnico.classe === 'alternativos' ||
+      SERIE_DIARIA_CLASSE[benchmarkUnico.classe] != null
+    )
+
+    let passivoReal = null
+    if (classeTemDiarioReal) {
+      // Mesmo cálculo diário por classe de calcularAtribuicao (benchmarkDoDia),
+      // em vez da série de nível única de SERIE_DIARIA_POR_MENSAL — essa
+      // reduzia pos_fixado a CDI puro (sem o IDA-DI), achatando a volatilidade
+      // do gráfico e divergindo do benchmark mostrado na Atribuição.
+      const diaAntesInicio = db.prepare(
+        `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data < ? ORDER BY data DESC LIMIT 1`
+      ).get(inicioEfetivo)?.data ?? inicioEfetivo
+      let acumuladoBench = 1
+      let diaAnteriorBench = diaAntesInicio
+      passivoReal = new Map()
+
+      for (const data of datasReferencia) {
+        const ret = retornoBenchmarkPeriodo(benchmarkUnico.classe, diaAnteriorBench, data, db)
+        if (ret != null) acumuladoBench *= 1 + ret
+        passivoReal.set(data, acumuladoBench - 1)
+        diaAnteriorBench = data
+      }
+    } else {
+      const serieDiarioReal = benchmarkUnico && SERIE_DIARIA_POR_MENSAL[benchmarkUnico.serieMensal]
+      passivoReal = serieDiarioReal
+        ? serieDiariaPassivoReal(db, serieDiarioReal, datasReferencia, mesInicioStr, mesFimStr)
+        : null
+    }
 
     if (passivoReal) {
       serieDiaria = datasReferencia.map((data) => ({
@@ -1372,9 +1393,10 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
         passivo_acumulado: passivoReal.get(data) ?? null,
         ativo_acumulado: ativoByData.get(data) ?? null,
       }))
-    } else {
-      // Fallback: sem série diária real do benchmark (multi-estratégia
-      // composta, ou índice só disponível mensal, ex: IDIV)
+    } else if (carteira.benchmark_override) {
+      // Override sem contraparte diária (ex: IDIV) — é um único número por
+      // mês, não uma composição por classe, então só espalhar geometricamente
+      // pelos dias úteis já é o correto aqui.
       const diasPorMes = new Map()
       for (const data of datasReferencia) {
         const m = data.slice(0, 7)
@@ -1393,6 +1415,121 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
           ativo_acumulado: ativoByData.get(data) ?? null,
         }
       })
+    } else {
+      // Fallback: carteira multi-classe sem dominante >50% — compõe o
+      // benchmark passivo dia a dia, ponderado por classe (mesmo padrão de
+      // benchmarkDoDia em calcularAtribuicao), em vez de espalhar o retorno
+      // mensal uniformemente pelos dias do mês. O espalhamento uniforme
+      // achatava a volatilidade a quase zero: o fator diário ficava idêntico
+      // em todos os dias do mesmo mês, apagando o movimento real de
+      // RV/multimercado que compõem a carteira passiva.
+      const alocPorMesFB = new Map(alocacoes.map((a) => [a.mes, a]))
+      const duMesCacheFB = new Map()
+      const diasUteisDoMesFB = (mes) => {
+        if (!duMesCacheFB.has(mes)) {
+          const [y, m] = mes.split('-').map(Number)
+          duMesCacheFB.set(mes, contarDiasUteis(`${mes}-01`, new Date(y, m, 0).toISOString().split('T')[0], db))
+        }
+        return duMesCacheFB.get(mes)
+      }
+      const diaAntesInicioFB = db.prepare(
+        `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data < ? ORDER BY data DESC LIMIT 1`
+      ).get(inicioEfetivo)?.data ?? inicioEfetivo
+      let acumPassDiario = 1
+      let diaAnteriorFB = diaAntesInicioFB
+      serieDiaria = datasReferencia.map((data) => {
+        const mes = data.slice(0, 7)
+        const aloc = alocPorMesFB.get(mes)
+        let retDia = 0
+        if (aloc) {
+          const cdiRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?`).get(mes + '-01')
+          const cdiMensalFB = cdiRow ? cdiRow.valor / 100 : 0
+          const ipcaRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data=?`).get(mes + '-01')
+          const ipcaMensalFB = ipcaRow ? ipcaRow.valor / 100 : 0
+          for (const cls of CLASSES) {
+            const pesoClasse = (aloc[cls] || 0) / 100
+            if (!pesoClasse) continue
+            let ret = retornoBenchmarkPeriodo(cls, diaAnteriorFB, data, db)
+            if (ret == null) {
+              const mensalCls = getBenchmarkMensalClasse(cls, cdiMensalFB, ipcaMensalFB, mes, db)
+              const n = diasUteisDoMesFB(mes)
+              ret = (mensalCls != null && n > 0) ? Math.pow(1 + mensalCls, 1 / n) - 1 : 0
+            }
+            retDia += ret * pesoClasse
+          }
+        }
+        acumPassDiario *= 1 + retDia
+        diaAnteriorFB = data
+        return {
+          data,
+          passivo_acumulado: acumPassDiario - 1,
+          ativo_acumulado: ativoByData.get(data) ?? null,
+        }
+      })
+    }
+  }
+
+  // Métricas do passivo, alpha total, tracking error e information ratio:
+  // preferem a série diária (já clipada certo ao período customizado) — a
+  // agregação mensal acima soma meses inteiros mesmo quando início/fim cai no
+  // meio do mês, divergindo do que o gráfico mostra (mesmo problema já
+  // corrigido em calcularMetricas/calcularAtribuicao). Cai pro mensal só se a
+  // série diária não puder ser montada.
+  let metricasPassivoFinal = { retorno_acumulado: acumPassivo - 1, cagr: cagrPassivo, volatilidade: volPassivo, sharpe: sharpePassivo, max_drawdown: maxDDP }
+  let alphaTotalFinal = acumAtivo / acumPassivoAlinhado - 1
+  let trackingErrorFinal = trackingError
+  let informationRatioFinal = informationRatio
+
+  if (serieDiaria?.length > 1) {
+    const cdiByData = new Map(ativoSerieDiaria.map((p) => [p.data, p.cdi_acumulado]))
+    const dias = []
+    for (let i = 1; i < serieDiaria.length; i++) {
+      const prev = serieDiaria[i - 1]
+      const cur = serieDiaria[i]
+      if (prev.passivo_acumulado == null || cur.passivo_acumulado == null) continue
+      const retPassivoDia = (1 + cur.passivo_acumulado) / (1 + prev.passivo_acumulado) - 1
+      const retAtivoDia = (prev.ativo_acumulado != null && cur.ativo_acumulado != null)
+        ? (1 + cur.ativo_acumulado) / (1 + prev.ativo_acumulado) - 1
+        : null
+      const cdiPrev = cdiByData.get(prev.data)
+      const cdiCur = cdiByData.get(cur.data)
+      const retCdiDia = (cdiPrev != null && cdiCur != null) ? (1 + cdiCur) / (1 + cdiPrev) - 1 : null
+      dias.push({ retPassivoDia, retAtivoDia, retCdiDia })
+    }
+
+    if (dias.length >= 2) {
+      const passivoFinal = serieDiaria[serieDiaria.length - 1].passivo_acumulado
+      const cagrPassivoD = Math.pow(1 + passivoFinal, 252 / serieDiaria.length) - 1
+
+      const retsP = dias.map((d) => d.retPassivoDia)
+      const mediaP = retsP.reduce((a, b) => a + b, 0) / retsP.length
+      const varP = retsP.reduce((s, r) => s + Math.pow(r - mediaP, 2), 0) / Math.max(retsP.length - 1, 1)
+      const volPassivoD = Math.sqrt(varP) * Math.sqrt(252)
+
+      const cdisValidos = dias.map((d) => d.retCdiDia).filter((r) => r != null)
+      const cdiMedioD = cdisValidos.length ? cdisValidos.reduce((a, b) => a + b, 0) / cdisValidos.length : 0
+      const cagrCDID = Math.pow(1 + cdiMedioD, 252) - 1
+      const sharpePassivoD = volPassivoD > 0 ? (cagrPassivoD - cagrCDID) / volPassivoD : null
+
+      let picoD = 1, maxDDD = 0
+      for (const { passivo_acumulado } of serieDiaria) {
+        if (passivo_acumulado == null) continue
+        const nav = 1 + passivo_acumulado
+        if (nav > picoD) picoD = nav
+        const dd = nav / picoD - 1
+        if (dd < maxDDD) maxDDD = dd
+      }
+
+      metricasPassivoFinal = { retorno_acumulado: passivoFinal, cagr: cagrPassivoD, volatilidade: volPassivoD, sharpe: sharpePassivoD, max_drawdown: maxDDD }
+      alphaTotalFinal = (1 + ativoMetricas.retorno_acumulado) / (1 + passivoFinal) - 1
+
+      const alphasD = dias.filter((d) => d.retAtivoDia != null).map((d) => d.retAtivoDia - d.retPassivoDia)
+      if (alphasD.length >= 2) {
+        const mediaAlphaD = alphasD.reduce((a, b) => a + b, 0) / alphasD.length
+        const varAlphaD = alphasD.reduce((s, a) => s + Math.pow(a - mediaAlphaD, 2), 0) / Math.max(alphasD.length - 1, 1)
+        trackingErrorFinal = Math.sqrt(varAlphaD) * Math.sqrt(252)
+        informationRatioFinal = trackingErrorFinal > 0 ? (ativoMetricas.cagr - cagrPassivoD) / trackingErrorFinal : null
+      }
     }
   }
 
@@ -1407,16 +1544,10 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
       sharpe: ativoMetricas.sharpe,
       max_drawdown: ativoMetricas.max_drawdown,
     },
-    metricas_passivo: {
-      retorno_acumulado: acumPassivo - 1,
-      cagr: cagrPassivo,
-      volatilidade: volPassivo,
-      sharpe: sharpePassivo,
-      max_drawdown: maxDDP,
-    },
-    alpha_total: acumAtivo / acumPassivoAlinhado - 1,
-    tracking_error: trackingError,
-    information_ratio: informationRatio,
+    metricas_passivo: metricasPassivoFinal,
+    alpha_total: alphaTotalFinal,
+    tracking_error: trackingErrorFinal,
+    information_ratio: informationRatioFinal,
     benchmarks: BENCHMARKS_PASSIVA,
     n_meses: T,
   }
@@ -1583,7 +1714,11 @@ export function calcularDadosDiariosPorProduto(carteiraId, dataInicio, dataFim) 
     let ativo = null
     for (const e of estados) {
       if (e.data_inicio > dia) break
-      if (!e.data_fim || e.data_fim >= dia) ativo = e
+      // Não descarta por data_fim ultrapassada: um gap entre o fim de um
+      // estado e o início do próximo (falha de publicação, não intenção de
+      // ficar sem posição) herda o último estado conhecido, em vez de zerar
+      // o retorno do dia enquanto o CDI de comparação segue acumulando.
+      ativo = e
     }
     return ativo
   }
@@ -2760,25 +2895,19 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     return ant.length ? alocByMes.get(ant[ant.length - 1]) : null
   }
 
+  // Série diária real de cada sub-carteira (mesmo motor calcularSerieDiaria),
+  // não mais o retorno mensal de calcularRetornoEstado espalhado pelos dias
+  // do mês — ver comentário equivalente em calcularSerieDiaria.
   const subCarteirasIds = [...new Set(
     todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
   )]
   const subRetDiario = new Map()
-  if (subCarteirasIds.length > 0) {
-    const mesesNoPeriodo = [...new Set(diasUteis.map((d) => d.slice(0, 7)))]
-    for (const mes of mesesNoPeriodo) {
-      const [y, m] = mes.split('-').map(Number)
-      const inicioMes = `${mes}-01`
-      const fimMes = new Date(y, m, 0).toISOString().split('T')[0]
-      const diasDoMes = diasUteis.filter((d) => d.slice(0, 7) === mes).length
-      if (diasDoMes === 0) continue
-      for (const subId of subCarteirasIds) {
-        const retMensal = calcularRetornoSubCarteira(Number(subId), inicioMes, fimMes)
-        if (retMensal != null) {
-          const base = 1 + retMensal
-          subRetDiario.set(`${subId}_${mes}`, base > 0 ? Math.pow(base, 1 / diasDoMes) - 1 : 0)
-        }
-      }
+  for (const subId of subCarteirasIds) {
+    const serieSub = calcularSerieDiaria(Number(subId), inicioStr, fimStr)
+    if (!serieSub?.length) continue
+    for (let i = 1; i < serieSub.length; i++) {
+      const ret = (1 + serieSub[i].retorno_acumulado) / (1 + serieSub[i - 1].retorno_acumulado) - 1
+      subRetDiario.set(`${subId}_${serieSub[i].data}`, ret)
     }
   }
 
@@ -2792,7 +2921,11 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
     let ativo = null
     for (const e of estados) {
       if (e.data_inicio > dia) break
-      if (!e.data_fim || e.data_fim >= dia) ativo = e
+      // Não descarta por data_fim ultrapassada: um gap entre o fim de um
+      // estado e o início do próximo (falha de publicação, não intenção de
+      // ficar sem posição) herda o último estado conhecido, em vez de zerar
+      // o retorno do dia enquanto o CDI de comparação segue acumulando.
+      ativo = e
     }
     return ativo
   }
@@ -2887,7 +3020,7 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
               }
             }
           } else if (p.tipo === 'carteira' && p.identificador) {
-            const retDiarioSub = subRetDiario.get(`${p.identificador}_${mes}`)
+            const retDiarioSub = subRetDiario.get(`${p.identificador}_${dia}`)
             if (retDiarioSub != null) retP = retDiarioSub
           }
 
