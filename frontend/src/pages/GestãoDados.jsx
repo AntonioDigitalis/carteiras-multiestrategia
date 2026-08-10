@@ -178,6 +178,23 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
   const [deleteStep, setDeleteStep] = useState(0)
   const [deleting, setDeleting] = useState(false)
   const [copyStep, setCopyStep] = useState(0)
+  const [deleteAlocStep, setDeleteAlocStep] = useState(0)
+  const [deletingAloc, setDeletingAloc] = useState(false)
+
+  async function excluirAlocacaoHandler() {
+    setDeletingAloc(true)
+    setError(null)
+    try {
+      await api.removerAlocacao(carteiraId, mes)
+      setDeleteAlocStep(0)
+      onSave()
+      setReloadKey((k) => k + 1)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeletingAloc(false)
+    }
+  }
 
   async function excluirMesHandler() {
     setDeleting(true)
@@ -214,6 +231,7 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
     setLoading(true)
     setDeleteStep(0)
     setCopyStep(0)
+    setDeleteAlocStep(0)
     Promise.all([
       api.getAlocacoes(carteiraId).then((all) => all.find((a) => a.mes === mes) || null),
       api.getEstados(carteiraId, mes),
@@ -476,6 +494,7 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
       )}
 
       <div className="flex justify-between items-center gap-2">
+        <div className="flex items-center gap-3">
         {/* Excluir dados do mês — dupla confirmação */}
         <div>
           {estados.some((e) => e.id) && (
@@ -522,6 +541,55 @@ function FormularioMes({ carteiraId, mes, mesAnterior, onSave }) {
             )
           )}
         </div>
+
+        {/* Limpar alocação macro do mês — dupla confirmação */}
+        <div>
+          {alocacao?.id && (
+            deleteAlocStep === 0 ? (
+              <button
+                onClick={() => setDeleteAlocStep(1)}
+                className="text-xs text-accent-red hover:text-red-400 flex items-center gap-1.5"
+              >
+                <Trash2 size={13} />
+                Limpar alocação macro
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+                <AlertTriangle size={14} className="text-accent-red shrink-0" />
+                <span className="text-xs text-red-300">
+                  {deleteAlocStep === 1
+                    ? `Apagar a alocação macro desta carteira em ${mes}? Produtos e estados não são afetados.`
+                    : 'Confirmação final — esta ação é irreversível.'}
+                </span>
+                <button
+                  onClick={() => setDeleteAlocStep(0)}
+                  disabled={deletingAloc}
+                  className="btn-secondary text-xs py-1 px-2 shrink-0"
+                >
+                  Cancelar
+                </button>
+                {deleteAlocStep === 1 ? (
+                  <button
+                    onClick={() => setDeleteAlocStep(2)}
+                    className="text-xs py-1 px-2 rounded bg-red-800 text-white hover:bg-red-700 shrink-0"
+                  >
+                    Continuar
+                  </button>
+                ) : (
+                  <button
+                    onClick={excluirAlocacaoHandler}
+                    disabled={deletingAloc}
+                    className="text-xs py-1 px-2 rounded bg-red-600 text-white hover:bg-red-500 flex items-center gap-1 shrink-0"
+                  >
+                    {deletingAloc ? 'Excluindo...' : (<><Trash2 size={12} />Excluir definitivamente</>)}
+                  </button>
+                )}
+              </div>
+            )
+          )}
+        </div>
+        </div>
+
         <button
           onClick={salvar}
           disabled={saving || !totalOk}
@@ -624,8 +692,12 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
 
   async function removerProduto(produtoId) {
     if (!confirm('Remover produto?')) return
-    await api.removerProduto(produtoId)
-    onUpdate({ ...estado, produtos: produtos.filter((p) => p.id !== produtoId) })
+    try {
+      await api.removerProduto(produtoId)
+      onUpdate({ ...estado, produtos: produtos.filter((p) => p.id !== produtoId) })
+    } catch (e) {
+      alert(e.message)
+    }
   }
 
   const fmtData = (d) => d ? format(parseISO(d), "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : null

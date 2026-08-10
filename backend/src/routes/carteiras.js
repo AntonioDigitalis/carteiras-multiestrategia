@@ -241,6 +241,16 @@ router.post('/:id/alocacoes', (req, res) => {
   res.json({ id: result.lastInsertRowid, ok: true })
 })
 
+// DELETE /api/carteiras/:id/alocacoes/:mes
+router.delete('/:id/alocacoes/:mes', (req, res) => {
+  const db = getDb()
+  const carteira = db.prepare('SELECT perfil_id FROM carteiras WHERE id = ?').get(req.params.id)
+  if (!carteira) return res.status(404).json({ error: 'Carteira não encontrada' })
+
+  db.prepare('DELETE FROM alocacoes_macro WHERE perfil_id = ? AND mes = ?').run(carteira.perfil_id, req.params.mes)
+  res.json({ ok: true })
+})
+
 // GET /api/carteiras/:id/meses-com-estados
 router.get('/:id/meses-com-estados', (req, res) => {
   const db = getDb()

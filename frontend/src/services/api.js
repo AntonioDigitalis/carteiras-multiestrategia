@@ -39,6 +39,8 @@ export const api = {
   getMesesComEstados: (carteiraId) => request(`/carteiras/${carteiraId}/meses-com-estados`),
   upsertAlocacao: (carteiraId, data) =>
     request(`/carteiras/${carteiraId}/alocacoes`, { method: 'POST', body: data }),
+  removerAlocacao: (carteiraId, mes) =>
+    request(`/carteiras/${carteiraId}/alocacoes/${mes}`, { method: 'DELETE' }),
   duplicarMes: (carteiraId, mesOrigem, mesDestino) =>
     request(`/carteiras/${carteiraId}/duplicar-mes`, { method: 'POST', body: { mes_origem: mesOrigem, mes_destino: mesDestino } }),
   excluirMes: (carteiraId, mes) =>
