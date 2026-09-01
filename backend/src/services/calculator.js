@@ -1135,6 +1135,8 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
   const ultimos24 = retornosMensais.slice(-24)
   const retorno_24m = ultimos24.length >= 24 ? ultimos24.reduce((p, r) => p * (1 + r.retorno), 1) - 1 : null
 
+  const contribuicao_risco = calcularContribuicaoRiscoClasses(carteiraId, carteira, inicioStr, fimStr, db)
+
   return {
     retorno_acumulado: retornoFinal,
     retorno_acumulado_cdi: retornoCDIFinal,
@@ -1162,6 +1164,7 @@ export function calcularMetricas(carteiraId, dataInicio, dataFim) {
     beta, up_capture, down_capture, benchmark_disponivel, benchmark_label,
     // Janelas fixas
     retorno_mtd, retorno_ytd, retorno_12m, retorno_24m,
+    contribuicao_risco,
   }
 }
 

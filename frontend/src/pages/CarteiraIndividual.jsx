@@ -319,64 +319,110 @@ function RetornoTab({ metricas }) {
   )
 }
 
+function ContribuicaoRiscoCard({ contribuicaoRisco }) {
+  const fmtPctSimples = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`
+  if (!contribuicaoRisco) {
+    return (
+      <div className="card">
+        <div className="text-sm font-medium text-slate-300 mb-1">Contribuição de Risco por Classe</div>
+        <p className="text-xs text-slate-500">Dados insuficientes no período para decompor o risco por classe (mínimo ~1 mês útil).</p>
+      </div>
+    )
+  }
+  return (
+    <div className="card">
+      <div className="text-sm font-medium text-slate-300 mb-1">Contribuição de Risco por Classe</div>
+      <p className="text-xs text-slate-500 mb-3">
+        Quanto cada classe responde pela volatilidade anualizada da carteira ({fmtPct(contribuicaoRisco.volatilidade_total)}), considerando peso atual e correlação com as demais.
+      </p>
+      <div className="space-y-2.5">
+        {contribuicaoRisco.linhas.map((l) => {
+          const semDados = l.contribuicao_pct == null
+          return (
+            <div key={l.classe}>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="text-slate-400">{l.label}</span>
+                <span className="font-mono text-slate-500">
+                  peso <span className="text-slate-300">{fmtPctSimples(l.peso)}</span>
+                  <span className="text-slate-700 mx-1.5">·</span>
+                  risco <span className={semDados ? 'text-slate-500' : 'text-slate-200'}>{fmtPctSimples(l.contribuicao_pct)}</span>
+                </span>
+              </div>
+              <div className="h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+                {!semDados && (
+                  <div className="h-full rounded-full bg-accent-blue/70" style={{ width: `${Math.min(Math.max(l.contribuicao_pct * 100, 0), 100)}%` }} />
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function RiscoTab({ metricas }) {
   const m = metricas
   const fmtPct2 = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-4">
-        <div className="card space-y-0.5">
-          <div className="text-sm font-medium text-slate-300 mb-3">Volatilidade e Drawdown</div>
-          <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
-            tooltip="Desvio padrão dos retornos mensais, anualizado (× √12)." />
-          <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
-            tooltip="Maior queda percentual do pico ao vale registrada no período." />
-          <MetricRow label="Duração MDD (dias úteis)" value={m.mdd_duracao ?? '—'}
-            tooltip="Dias úteis desde o pico até o fundo do maior drawdown." />
-          <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
-            tooltip="Retorno excedente ao CDI dividido pela volatilidade total." />
-          <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
-            tooltip="Como o Sharpe, mas penaliza apenas a volatilidade negativa (downside deviation)." />
-          <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
-            tooltip="CAGR / |Max Drawdown|. Retorno anual por unidade de queda máxima." />
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-4">
+          <div className="card space-y-0.5">
+            <div className="text-sm font-medium text-slate-300 mb-3">Volatilidade e Drawdown</div>
+            <MetricRow label="Volatilidade anualizada" value={fmtPct(m.volatilidade)}
+              tooltip="Desvio padrão dos retornos mensais, anualizado (× √12)." />
+            <MetricRow label="Max Drawdown" value={fmtPct(m.max_drawdown)} highlight={-1}
+              tooltip="Maior queda percentual do pico ao vale registrada no período." />
+            <MetricRow label="Duração MDD (dias úteis)" value={m.mdd_duracao ?? '—'}
+              tooltip="Dias úteis desde o pico até o fundo do maior drawdown." />
+            <MetricRow label="Sharpe" value={m.sharpe?.toFixed(2)} highlight={m.sharpe}
+              tooltip="Retorno excedente ao CDI dividido pela volatilidade total." />
+            <MetricRow label="Sortino" value={m.sortino?.toFixed(2)} highlight={m.sortino}
+              tooltip="Como o Sharpe, mas penaliza apenas a volatilidade negativa (downside deviation)." />
+            <MetricRow label="Calmar" value={m.calmar?.toFixed(2)} highlight={m.calmar}
+              tooltip="CAGR / |Max Drawdown|. Retorno anual por unidade de queda máxima." />
+          </div>
+
+          <div className="card space-y-0.5">
+            <div className="text-sm font-medium text-slate-300 mb-3">VaR / CVaR Histórico (mensal)</div>
+            <MetricRow label="VaR 95%" value={fmtPct2(m.var_95)} highlight={-1}
+              tooltip="Em 95% dos meses, a perda não superou este valor. Calculado como o percentil 5% dos retornos mensais." />
+            <MetricRow label="CVaR 95%" value={fmtPct2(m.cvar_95)} highlight={-1}
+              tooltip="Perda média esperada nos 5% piores meses. Mais conservador que o VaR." />
+            <MetricRow label="VaR 99%" value={fmtPct2(m.var_99)} highlight={-1}
+              tooltip="Em 99% dos meses, a perda não superou este valor (percentil 1%)." />
+            <MetricRow label="CVaR 99%" value={fmtPct2(m.cvar_99)} highlight={-1}
+              tooltip="Perda média esperada no 1% pior dos meses." />
+          </div>
         </div>
 
-        <div className="card space-y-0.5">
-          <div className="text-sm font-medium text-slate-300 mb-3">VaR / CVaR Histórico (mensal)</div>
-          <MetricRow label="VaR 95%" value={fmtPct2(m.var_95)} highlight={-1}
-            tooltip="Em 95% dos meses, a perda não superou este valor. Calculado como o percentil 5% dos retornos mensais." />
-          <MetricRow label="CVaR 95%" value={fmtPct2(m.cvar_95)} highlight={-1}
-            tooltip="Perda média esperada nos 5% piores meses. Mais conservador que o VaR." />
-          <MetricRow label="VaR 99%" value={fmtPct2(m.var_99)} highlight={-1}
-            tooltip="Em 99% dos meses, a perda não superou este valor (percentil 1%)." />
-          <MetricRow label="CVaR 99%" value={fmtPct2(m.cvar_99)} highlight={-1}
-            tooltip="Perda média esperada no 1% pior dos meses." />
+        <div className="space-y-4">
+          <div className="card space-y-0.5">
+            <div className="text-sm font-medium text-slate-300 mb-3">vs. {m.benchmark_label ?? 'Benchmark'}</div>
+            {!m.benchmark_disponivel && (
+              <p className="text-xs text-slate-500">Dados insuficientes de {m.benchmark_label ?? 'benchmark'} no período (&lt; 12 meses de overlap).</p>
+            )}
+            <MetricRow label="Beta" value={m.beta?.toFixed(2) ?? '—'}
+              tooltip={`Sensibilidade da carteira ao ${m.benchmark_label ?? 'benchmark'}. Beta=1 move igual ao índice; <1 menos sensível; >1 amplifica os movimentos.`} />
+            <MetricRow label="Up Capture" value={m.up_capture != null ? `${(m.up_capture * 100).toFixed(0)}%` : '—'}
+              tooltip={`Quanto a carteira capturou dos meses de alta do ${m.benchmark_label ?? 'benchmark'}. Acima de 100% = superou o índice nas altas.`} />
+            <MetricRow label="Down Capture" value={m.down_capture != null ? `${(m.down_capture * 100).toFixed(0)}%` : '—'}
+              tooltip={`Quanto a carteira capturou das quedas do ${m.benchmark_label ?? 'benchmark'}. Abaixo de 100% = perdeu menos que o índice nas baixas.`} />
+          </div>
+
+          <div className="card space-y-0.5">
+            <div className="text-sm font-medium text-slate-300 mb-3">Retorno por Janela</div>
+            <MetricRow label="Mês atual (MTD)" value={fmtPct2(m.retorno_mtd)} highlight={m.retorno_mtd} />
+            <MetricRow label="Ano (YTD)" value={fmtPct2(m.retorno_ytd)} highlight={m.retorno_ytd} />
+            <MetricRow label="12 meses" value={fmtPct2(m.retorno_12m)} highlight={m.retorno_12m} />
+            <MetricRow label="24 meses" value={fmtPct2(m.retorno_24m)} highlight={m.retorno_24m} />
+            <MetricRow label="Desde o início" value={fmtPct(m.retorno_acumulado)} highlight={m.retorno_acumulado} />
+          </div>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="card space-y-0.5">
-          <div className="text-sm font-medium text-slate-300 mb-3">vs. {m.benchmark_label ?? 'Benchmark'}</div>
-          {!m.benchmark_disponivel && (
-            <p className="text-xs text-slate-500">Dados insuficientes de {m.benchmark_label ?? 'benchmark'} no período (&lt; 12 meses de overlap).</p>
-          )}
-          <MetricRow label="Beta" value={m.beta?.toFixed(2) ?? '—'}
-            tooltip={`Sensibilidade da carteira ao ${m.benchmark_label ?? 'benchmark'}. Beta=1 move igual ao índice; <1 menos sensível; >1 amplifica os movimentos.`} />
-          <MetricRow label="Up Capture" value={m.up_capture != null ? `${(m.up_capture * 100).toFixed(0)}%` : '—'}
-            tooltip={`Quanto a carteira capturou dos meses de alta do ${m.benchmark_label ?? 'benchmark'}. Acima de 100% = superou o índice nas altas.`} />
-          <MetricRow label="Down Capture" value={m.down_capture != null ? `${(m.down_capture * 100).toFixed(0)}%` : '—'}
-            tooltip={`Quanto a carteira capturou das quedas do ${m.benchmark_label ?? 'benchmark'}. Abaixo de 100% = perdeu menos que o índice nas baixas.`} />
-        </div>
-
-        <div className="card space-y-0.5">
-          <div className="text-sm font-medium text-slate-300 mb-3">Retorno por Janela</div>
-          <MetricRow label="Mês atual (MTD)" value={fmtPct2(m.retorno_mtd)} highlight={m.retorno_mtd} />
-          <MetricRow label="Ano (YTD)" value={fmtPct2(m.retorno_ytd)} highlight={m.retorno_ytd} />
-          <MetricRow label="12 meses" value={fmtPct2(m.retorno_12m)} highlight={m.retorno_12m} />
-          <MetricRow label="24 meses" value={fmtPct2(m.retorno_24m)} highlight={m.retorno_24m} />
-          <MetricRow label="Desde o início" value={fmtPct(m.retorno_acumulado)} highlight={m.retorno_acumulado} />
-        </div>
-      </div>
+      <ContribuicaoRiscoCard contribuicaoRisco={m.contribuicao_risco} />
     </div>
   )
 }
