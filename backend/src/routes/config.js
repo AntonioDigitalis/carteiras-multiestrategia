@@ -4,7 +4,12 @@ import { getDb } from '../db/database.js'
 const router = Router()
 
 // Chaves sensíveis que nunca devem ser expostas em texto plano via API
-const SENSITIVE_CONFIG_KEYS = new Set(['anbima_client_id', 'anbima_client_secret'])
+// (as URLs Economatica carregam um token de acesso na própria URL)
+const SENSITIVE_CONFIG_KEYS = new Set([
+  'anbima_client_id', 'anbima_client_secret',
+  'economatica_url_acoes', 'economatica_url_fiis', 'economatica_url_etfs',
+  'economatica_url_indices', 'economatica_url_papeis_rf', 'economatica_url_fundos',
+])
 
 // GET /api/config
 router.get('/', (req, res) => {
