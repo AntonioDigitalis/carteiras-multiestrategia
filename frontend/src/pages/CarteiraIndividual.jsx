@@ -424,14 +424,17 @@ function AtribuicaoTab({ carteiraId, period }) {
   const [expanded, setExpanded] = useState({})
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     const params = {}
     if (period?.start) params.start = period.start
     if (period?.end) params.end = period.end
     api.getAtribuicao(carteiraId, params)
-      .then(setData)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+      .then((data) => { if (!cancelled) setData(data) })
+      .catch((e) => { if (!cancelled) console.error(e) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
   }, [carteiraId, period?.start, period?.end])
 
   if (loading) return <LoadingSpinner />
@@ -553,14 +556,17 @@ function PassivaTab({ carteiraId, period }) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     const params = {}
     if (period?.start) params.start = period.start
     if (period?.end) params.end = period.end
     api.getCarteiraPassiva(carteiraId, params)
-      .then(setData)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+      .then((data) => { if (!cancelled) setData(data) })
+      .catch((e) => { if (!cancelled) console.error(e) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
   }, [carteiraId, period?.start, period?.end])
 
   if (loading) return <LoadingSpinner />
