@@ -2241,50 +2241,93 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
 
   if (meses.length < 3) return { error: 'Período insuficiente de dados (mínimo 3 meses).' }
 
-  // Retornos mensais por ativo
-  // Para tickers não presentes nesta carteira, busca produto em qualquer carteira como referência
+  // Calendário de dias úteis via CDI_DIARIO (mesma referência usada em calcularSerieDiaria).
+  // Retornos diários em vez de mensais: com poucos meses de histórico (ex: ETF novo),
+  // uma amostra de meia dúzia de retornos MENSAIS não tem poder estatístico para
+  // estimar variância — o ruído da amostra pode inverter qual ativo "parece" mais
+  // volátil mesmo quando os dados diários mostram claramente o contrário.
+  const [efy, efm] = mesFimStr.split('-').map(Number)
+  const dataInicioStr = `${mesInicioStr}-01`
+  const dataFimStr = new Date(efy, efm, 0).toISOString().split('T')[0]
+
+  const cdiRowsDiario = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicioStr, dataFimStr)
+  if (cdiRowsDiario.length < 15) return { error: 'Período insuficiente de dados (mínimo ~1 mês útil).' }
+  const diasUteis = cdiRowsDiario.map((r) => r.data)
+  const cdiMedioDiario = cdiRowsDiario.reduce((s, r) => s + r.valor / 100, 0) / cdiRowsDiario.length
+
+  const bufferInicio = new Date(dataInicioStr + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+  const TICKER_ALIASES = { 'CVBI11': 'PCIP11', 'PCIP11': 'CVBI11', 'AXIA7': 'AXIA3' }
+
+  // Retornos diários por ativo. Ativos do tipo 'carteira' (sub-carteira como posição)
+  // usam a própria série diária real; fundo/ação usam as cotas em cache com
+  // "última cota conhecida" para preencher dias sem pregão do ativo específico.
   const ativosComDados = ativosParam.map((ativo) => {
-    const retornosMensais = meses.map((mes) => {
-      const [ano, m] = mes.split('-').map(Number)
-      const inicioMes = `${mes}-01`
-      const fimMes = new Date(ano, m, 0).toISOString().split('T')[0]
+    const retMap = new Map()
 
-      const produto =
-        db.prepare(`
-          SELECT p.* FROM produtos p
-          JOIN estados_portfolio ep ON p.estado_id = ep.id
-          WHERE ep.carteira_id = ? AND ep.mes = ? AND p.identificador = ? AND p.classe = ?
-          LIMIT 1
-        `).get(carteiraId, mes, ativo.identificador, classe)
-        // Fallback: ticker adicionado manualmente — usa qualquer produto com esse identificador
-        ?? db.prepare(`SELECT * FROM produtos WHERE identificador = ? AND tipo = ? LIMIT 1`)
-           .get(ativo.identificador, ativo.tipo)
+    if (ativo.tipo === 'carteira') {
+      const subId = Number(ativo.identificador)
+      const serieSub = subId ? calcularSerieDiaria(subId, dataInicioStr, dataFimStr) : null
+      if (serieSub?.length) {
+        for (let i = 1; i < serieSub.length; i++) {
+          const ret = (1 + serieSub[i].retorno_acumulado) / (1 + serieSub[i - 1].retorno_acumulado) - 1
+          retMap.set(serieSub[i].data, ret)
+        }
+      }
+    } else {
+      const alias = TICKER_ALIASES[ativo.identificador]
+      const identifiers = alias ? [ativo.identificador, alias] : [ativo.identificador]
+      const placeholders = identifiers.map(() => '?').join(', ')
+      const cotas = db.prepare(`
+        SELECT cc.data, MAX(cc.valor_ajustado) AS valor_ajustado, MAX(cc.valor) AS valor
+        FROM cotas_cache cc
+        JOIN produtos p ON cc.produto_id = p.id
+        WHERE p.identificador IN (${placeholders}) AND p.tipo = ?
+          AND cc.data >= ? AND cc.data <= ?
+        GROUP BY cc.data
+        ORDER BY cc.data
+      `).all(...identifiers, ativo.tipo, bufferStr, dataFimStr)
 
-      if (!produto) return null
-      return calcularRetornoProduto(produto, inicioMes, fimMes)
-    })
+      let ultimaCota = null
+      for (const r of cotas) {
+        const valor = r.valor_ajustado ?? r.valor
+        if (r.data < dataInicioStr) {
+          if (valor > 0) ultimaCota = valor
+          continue
+        }
+        if (valor > 0 && ultimaCota > 0) {
+          const raw = valor / ultimaCota - 1
+          if (Math.abs(raw) <= 0.40) retMap.set(r.data, raw)
+        }
+        if (valor > 0) ultimaCota = valor
+      }
+    }
 
-    const nComDados = retornosMensais.filter((r) => r != null).length
-    return { ...ativo, retornosMensais, n_meses_com_dados: nComDados }
+    const retornosDiarios = diasUteis.map((dia) => retMap.get(dia) ?? null)
+    const nComDados = retornosDiarios.filter((r) => r != null).length
+    return { ...ativo, retornosDiarios, n_dias_com_dados: nComDados }
   })
 
-  const minMeses = Math.max(3, Math.ceil(meses.length * 0.3))
-  const ativosValidos = ativosComDados.filter((a) => a.n_meses_com_dados >= minMeses)
+  const minDias = Math.max(15, Math.ceil(diasUteis.length * 0.3))
+  const ativosValidos = ativosComDados.filter((a) => a.n_dias_com_dados >= minDias)
 
   if (ativosValidos.length < 2) {
     return {
       error: 'Dados insuficientes para simular. Sincronize as cotas dos ativos primeiro.',
       ativos: ativosComDados.map((a) => ({
         nome: a.nome, identificador: a.identificador, tipo: a.tipo,
-        n_meses_com_dados: a.n_meses_com_dados,
-        valido: a.n_meses_com_dados >= minMeses,
+        n_dias_com_dados: a.n_dias_com_dados,
+        valido: a.n_dias_com_dados >= minDias,
       })),
     }
   }
 
-  const T = meses.length
-  const retMatrix = meses.map((_, mi) =>
-    ativosValidos.map((a) => a.retornosMensais[mi] ?? 0)
+  const T = diasUteis.length
+  const retMatrix = diasUteis.map((_, di) =>
+    ativosValidos.map((a) => a.retornosDiarios[di] ?? 0)
   )
 
   const n = ativosValidos.length
@@ -2296,11 +2339,6 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       cov[i][j] = retMatrix.reduce((s, row) => s + (row[i] - means[i]) * (row[j] - means[j]), 0) / Math.max(T - 1, 1)
     }
   }
-
-  const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
-  const cdiMedioMensal = cdiRows.length > 0
-    ? cdiRows.reduce((s, r) => s + r.valor / 100, 0) / cdiRows.length
-    : 0.01
 
   // Pesos atuais: último estado disponível
   const ultimoEstado = db.prepare(
@@ -2320,14 +2358,14 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
   }
 
   function portfolioStats(weights) {
-    const retMensal = weights.reduce((s, w, i) => s + w * means[i], 0)
+    const retDiario = weights.reduce((s, w, i) => s + w * means[i], 0)
     let variancia = 0
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) variancia += weights[i] * weights[j] * cov[i][j]
     }
-    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(12)
-    const cagr = Math.pow(1 + retMensal, 12) - 1
-    const sharpe = vol > 0 ? (cagr - cdiMedioMensal * 12) / vol : 0
+    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(252)
+    const cagr = Math.pow(1 + retDiario, 252) - 1
+    const sharpe = vol > 0 ? (cagr - cdiMedioDiario * 252) / vol : 0
     return { vol, cagr, sharpe }
   }
 
@@ -2392,7 +2430,7 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
     label_classe: LABELS_CLASSE[classe] || classe,
     ativos: ativosComDados.map((a) => ({
       nome: a.nome, identificador: a.identificador, tipo: a.tipo,
-      n_meses_com_dados: a.n_meses_com_dados,
+      n_dias_com_dados: a.n_dias_com_dados,
       valido: ativosValidos.some((v) => v.identificador === a.identificador),
     })),
     fronteira: base.map((p) => ({ vol: p.vol, cagr: p.cagr, sharpe: p.sharpe, weights: toWeightMap(p) })),
@@ -2403,7 +2441,7 @@ export function otimizarDentroClasse(carteiraId, classe, ativosParam, dataInicio
       ...(restricoesAtivas && !ercSatisfaz ? { viola_restricoes: true } : {}),
     },
     atual: { ...portfolioStats(pesosAtuais), weights: toWeightMap({ weights: pesosAtuais }) },
-    n_meses: T,
+    n_dias: T,
     n_simulacoes: nSimulacoes,
     ...(restricoesAtivas ? { n_simulacoes_total: portfolios.length, n_simulacoes_validas: portfoliosFiltrados.length } : {}),
   }

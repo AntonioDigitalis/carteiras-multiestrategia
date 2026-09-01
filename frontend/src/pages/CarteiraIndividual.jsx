@@ -1121,7 +1121,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
                 <div key={a.identificador} className="flex items-center justify-between text-xs py-1 border-b border-border/20 last:border-0">
                   <span className={a.valido ? 'text-slate-300' : 'text-slate-500'}>{a.nome}</span>
                   <span className={a.valido ? 'text-accent-green' : 'text-accent-red'}>
-                    {a.valido ? `${a.n_meses_com_dados} meses` : 'sem dados — sincronize cotas'}
+                    {a.valido ? `${a.n_dias_com_dados} dias` : 'sem dados — sincronize cotas'}
                   </span>
                 </div>
               ))}
@@ -1192,7 +1192,7 @@ function OtimizadorAtivo({ carteiraId, period }) {
               </tbody>
             </table>
             <div className="mt-3 text-[10px] text-slate-600">
-              Baseado em {resultado.n_meses} meses · {resultado.n_simulacoes?.toLocaleString()} simulações
+              Baseado em {resultado.n_dias} dias úteis · {resultado.n_simulacoes?.toLocaleString()} simulações
             </div>
           </div>
         </>
