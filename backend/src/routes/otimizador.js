@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getDb } from '../db/database.js'
 import { otimizarMacroLivre, otimizarAtivosLivre } from '../services/calculator.js'
-import { fetchHistoricoBrapi } from '../services/external.js'
+import { fetchHistoricoBrapi, garantirDadosMacro, garantirIndicesGlobaisDiarios } from '../services/external.js'
 
 const router = Router()
 
@@ -13,7 +13,7 @@ function isValidDate(s) {
 }
 
 // POST /api/otimizador/macro
-router.post('/macro', (req, res) => {
+router.post('/macro', async (req, res) => {
   try {
     const { start, end, n_simulacoes, min_peso, max_peso, classes } = req.body
     if (start && !isValidDate(start)) return res.status(400).json({ error: 'start deve ser YYYY-MM-DD' })
@@ -23,6 +23,10 @@ router.post('/macro', (req, res) => {
     if (minP < 0 || minP > 100) return res.status(400).json({ error: 'min_peso deve estar entre 0 e 100' })
     if (maxP < 0 || maxP > 100) return res.status(400).json({ error: 'max_peso deve estar entre 0 e 100' })
     if (minP > maxP) return res.status(400).json({ error: `min_peso (${minP}%) não pode ser maior que max_peso (${maxP}%)` })
+    const efStart = start || '2020-01-01'
+    const efEnd = end || new Date().toISOString().split('T')[0]
+    await garantirDadosMacro(efStart, efEnd)
+    await garantirIndicesGlobaisDiarios(efStart, efEnd)
     const classesParam = Array.isArray(classes) && classes.length > 0 ? classes : null
     const data = otimizarMacroLivre(start || null, end || null, n_simulacoes ?? 5000, minP / 100, maxP / 100, classesParam)
     if (!data) return res.json(null)

@@ -1916,6 +1916,220 @@ export function calcularPainelMercado(mes) {
 
 // ── Otimizador de Carteira (Monte Carlo) ───────────────────
 
+// Retorno diário por classe a partir dos produtos que a carteira efetivamente
+// possui — mesmo critério de calcularRetornosMensaisPorClasse (peso relativo
+// dos produtos DENTRO da classe; não multiplica pelo peso da classe na
+// alocação, pois queremos "quanto essa classe rendeu sozinha" para a
+// covariância, não sua contribuição para o retorno total), só que dia a dia.
+// Reaproveita a mesma lógica/dados de calcularSerieDiaria (LOCF de cota,
+// filtro de retorno diário >40%, sub-carteira via série diária real).
+function calcularRetornosDiariosPorClasse(carteiraId, dataInicioStr, dataFimStr, db) {
+  const estados = db.prepare(`
+    SELECT * FROM estados_portfolio
+    WHERE carteira_id = ? AND data_inicio <= ? AND (data_fim IS NULL OR data_fim >= ?)
+    ORDER BY data_inicio
+  `).all(carteiraId, dataFimStr, dataInicioStr)
+  const classes = Object.keys(LABELS_CLASSE)
+  const retornosPorClasse = Object.fromEntries(classes.map((c) => [c, new Map()]))
+  if (!estados.length) return retornosPorClasse
+
+  const estadoIds = estados.map((e) => e.id)
+  const phE = estadoIds.map(() => '?').join(',')
+  const todosProds = db.prepare(`SELECT * FROM produtos WHERE estado_id IN (${phE})`).all(...estadoIds)
+  const prodsByEstado = new Map()
+  for (const p of todosProds) {
+    if (!prodsByEstado.has(p.estado_id)) prodsByEstado.set(p.estado_id, [])
+    prodsByEstado.get(p.estado_id).push(p)
+  }
+
+  const identifiers = [...new Set(
+    todosProds.filter((p) => (p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador).map((p) => p.identificador)
+  )]
+
+  const bufferInicio = new Date(dataInicioStr + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+  const cotasMapByIdent = new Map()
+  if (identifiers.length) {
+    const ph2 = identifiers.map(() => '?').join(',')
+    const rows = db.prepare(`
+      SELECT p.identificador, cc.data, MAX(cc.valor) AS valor, MAX(cc.valor_ajustado) AS valor_ajustado
+      FROM cotas_cache cc
+      JOIN produtos p ON cc.produto_id = p.id
+      WHERE p.identificador IN (${ph2}) AND cc.data >= ? AND cc.data <= ?
+      GROUP BY p.identificador, cc.data
+      ORDER BY p.identificador, cc.data
+    `).all(...identifiers, bufferStr, dataFimStr)
+    for (const r of rows) {
+      if (!cotasMapByIdent.has(r.identificador)) cotasMapByIdent.set(r.identificador, new Map())
+      cotasMapByIdent.get(r.identificador).set(r.data, r.valor_ajustado ?? r.valor)
+    }
+  }
+
+  const cdiRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicioStr, dataFimStr)
+  if (!cdiRows.length) return retornosPorClasse
+  const cdiByData = new Map(cdiRows.map((r) => [r.data, r.valor / 100]))
+  const diasUteis = cdiRows.map((r) => r.data)
+
+  const ipcaRows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicioStr.slice(0, 7) + '-01', dataFimStr.slice(0, 7) + '-01')
+  const ipcaByMes = new Map(ipcaRows.map((r) => [r.data.slice(0, 7), r.valor / 100]))
+
+  const subCarteirasIds = [...new Set(
+    todosProds.filter((p) => p.tipo === 'carteira' && p.identificador).map((p) => p.identificador)
+  )]
+  const subRetDiario = new Map()
+  for (const subId of subCarteirasIds) {
+    const serieSub = calcularSerieDiaria(Number(subId), dataInicioStr, dataFimStr)
+    if (!serieSub?.length) continue
+    for (let i = 1; i < serieSub.length; i++) {
+      const ret = (1 + serieSub[i].retorno_acumulado) / (1 + serieSub[i - 1].retorno_acumulado) - 1
+      subRetDiario.set(`${subId}_${serieSub[i].data}`, ret)
+    }
+  }
+
+  const ultimaCota = new Map()
+  for (const [ident, cotasMap] of cotasMapByIdent) {
+    const antes = [...cotasMap.keys()].filter((d) => d < dataInicioStr).sort()
+    if (antes.length) ultimaCota.set(ident, cotasMap.get(antes[antes.length - 1]))
+  }
+
+  function getEstado(dia) {
+    let ativo = null
+    for (const e of estados) {
+      if (e.data_inicio > dia) break
+      ativo = e
+    }
+    return ativo
+  }
+
+  for (const dia of diasUteis) {
+    const cdiDiario = cdiByData.get(dia) ?? 0
+    const mes = dia.slice(0, 7)
+    const estado = getEstado(dia)
+    const filteredIdents = new Set()
+
+    if (estado) {
+      const prods = prodsByEstado.get(estado.id) || []
+      const classeMap = {}
+      for (const p of prods) {
+        if (!classeMap[p.classe]) classeMap[p.classe] = []
+        classeMap[p.classe].push(p)
+      }
+
+      for (const [classe, classeProds] of Object.entries(classeMap)) {
+        const retsPorProd = classeProds.map((p) => {
+          let retP = null
+          if (p.tipo === 'rf_curva') {
+            const { indexador, tipo_cdi, taxa, data_emissao, data_vencimento, isento_ir } = p
+            if ((data_vencimento && dia > data_vencimento) || (data_emissao && dia < data_emissao)) {
+              retP = 0
+            } else if (indexador === 'PRE') {
+              retP = Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'CDI') {
+              retP = tipo_cdi === 'pct'
+                ? cdiDiario * (taxa / 100)
+                : cdiDiario + Math.pow(1 + taxa / 100, 1 / 252) - 1
+            } else if (indexador === 'IPCA') {
+              const ipcaMensal = ipcaByMes.get(mes) ?? 0.005
+              retP = (Math.pow(1 + ipcaMensal, 1 / 21) - 1) + (Math.pow(1 + taxa / 100, 1 / 252) - 1)
+            }
+            if (retP !== null && isento_ir) retP /= (1 - 0.15)
+          } else if ((p.tipo === 'fundo' || p.tipo === 'acao') && p.identificador) {
+            const cotasMap = cotasMapByIdent.get(p.identificador)
+            if (cotasMap) {
+              const valorHoje = cotasMap.get(dia)
+              const valorAntes = ultimaCota.get(p.identificador)
+              if (valorHoje && valorAntes && valorAntes > 0) {
+                const raw = valorHoje / valorAntes - 1
+                if (Math.abs(raw) <= 0.40) retP = raw
+                else filteredIdents.add(p.identificador)
+              }
+            }
+          } else if (p.tipo === 'carteira' && p.identificador) {
+            const retDiarioSub = subRetDiario.get(`${p.identificador}_${dia}`)
+            if (retDiarioSub != null) retP = retDiarioSub
+          }
+          return { p, retP }
+        })
+
+        const pesoComDados = retsPorProd.reduce((s, { p, retP }) => retP != null ? s + (p.peso || 0) : s, 0)
+        let retClasse = 0
+        let algumComDados = false
+        for (const { p, retP } of retsPorProd) {
+          if (retP !== null) { retClasse += retP * ((p.peso || 0) / (pesoComDados || 1)); algumComDados = true }
+        }
+        if (algumComDados) retornosPorClasse[classe].set(dia, retClasse)
+      }
+    }
+
+    for (const [ident, cotasMap] of cotasMapByIdent) {
+      const v = cotasMap.get(dia)
+      if (v !== undefined && v > 0 && !filteredIdents.has(ident)) ultimaCota.set(ident, v)
+    }
+  }
+
+  return retornosPorClasse
+}
+
+// Contribuição de cada classe para a volatilidade total da carteira, com os
+// pesos ATUAIS (última alocação), via decomposição de Euler sobre a matriz de
+// covariância diária real: RC_i = w_i·(Σw)_i / σ_p, anualizada — a soma das
+// contribuições bate exatamente com a volatilidade anualizada da carteira.
+// Reaproveita a mesma série de retornos por classe do otimizador de carteira.
+// Classes sem peso ou sem dado de retorno ficam com contribuição null (o
+// chamador decide como exibir — ex: "—").
+function calcularContribuicaoRiscoClasses(carteiraId, carteira, inicioStr, fimStr, db) {
+  const cdiRowsDiario = db.prepare(
+    `SELECT data FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(inicioStr, fimStr)
+  if (cdiRowsDiario.length < 15) return null
+  const diasUteis = cdiRowsDiario.map((r) => r.data)
+
+  const retornosPorClasse = calcularRetornosDiariosPorClasse(carteiraId, inicioStr, fimStr, db)
+  const CLASSES = Object.keys(LABELS_CLASSE)
+  const classesComDados = CLASSES.filter((cls) => retornosPorClasse[cls].size > 0)
+  if (classesComDados.length === 0) return null
+
+  const T = diasUteis.length
+  const retMatrix = diasUteis.map((dia) => classesComDados.map((cls) => retornosPorClasse[cls].get(dia) ?? 0))
+  const n = classesComDados.length
+  const means = classesComDados.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
+  const cov = Array.from({ length: n }, () => Array(n).fill(0))
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      cov[i][j] = retMatrix.reduce((s, row) => s + (row[i] - means[i]) * (row[j] - means[j]), 0) / Math.max(T - 1, 1)
+
+  const mesFimStr = fimStr.slice(0, 7)
+  const ultimaAloc = db.prepare(
+    `SELECT * FROM alocacoes_macro WHERE perfil_id = ? AND mes <= ? ORDER BY mes DESC LIMIT 1`
+  ).get(carteira.perfil_id, mesFimStr)
+  const w = classesComDados.map((cls) => (ultimaAloc?.[cls] || 0) / 100)
+
+  const sigmaW = w.map((_, i) => cov[i].reduce((s, cij, j) => s + cij * w[j], 0))
+  const volDiaria = Math.sqrt(Math.max(w.reduce((s, wi, i) => s + wi * sigmaW[i], 0), 0))
+  const volAnual = volDiaria * Math.sqrt(252)
+
+  const linhas = CLASSES.map((cls) => {
+    const idx = classesComDados.indexOf(cls)
+    const peso = (ultimaAloc?.[cls] || 0) / 100
+    const semContribuicao = idx === -1 || peso === 0 || volDiaria === 0
+    return {
+      classe: cls,
+      label: LABELS_CLASSE[cls],
+      peso,
+      vol_classe: idx === -1 ? null : Math.sqrt(Math.max(cov[idx][idx], 0)) * Math.sqrt(252),
+      contribuicao_risco: semContribuicao ? null : (peso * sigmaW[idx] / volDiaria) * Math.sqrt(252),
+      contribuicao_pct: semContribuicao ? null : (peso * sigmaW[idx] / volDiaria) / volDiaria,
+    }
+  })
+
+  return { linhas, volatilidade_total: volAnual, n_dias: T }
+}
+
 export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1) {
   const db = getDb()
   const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
@@ -1938,42 +2152,49 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   // Usa o mais recente entre: 24 meses atrás e o início da carteira; ignorando o período selecionado
   const mesInicioStr = inicioPossivel > inicio12m ? inicioPossivel : inicio12m
 
-  const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
-  const cdiMedioMensal = cdiRows.length > 0
-    ? cdiRows.reduce((s, r) => s + r.valor / 100, 0) / cdiRows.length
-    : 0.01
+  // Calendário de dias úteis via CDI_DIARIO — mesmo motor diário do resto do
+  // app. 24 meses em pontos mensais é pouco pra estimar covariância entre até
+  // 9 classes; diário dá ~500 pontos reais.
+  const [efy, efm] = mesFimStr.split('-').map(Number)
+  const dataInicioStr = `${mesInicioStr}-01`
+  const dataFimStr = new Date(efy, efm, 0).toISOString().split('T')[0]
 
-  const retornosMensais = calcularRetornosMensaisPorClasse(carteiraId, mesInicioStr, mesFimStr)
+  const cdiRowsDiario = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicioStr, dataFimStr)
+  if (cdiRowsDiario.length < 15) return { error: 'Período insuficiente de dados (mínimo ~1 mês útil).' }
+  const diasUteis = cdiRowsDiario.map((r) => r.data)
+  const cdiMedioDiario = cdiRowsDiario.reduce((s, r) => s + r.valor / 100, 0) / cdiRowsDiario.length
+
+  const retornosPorClasseDiario = calcularRetornosDiariosPorClasse(carteiraId, dataInicioStr, dataFimStr, db)
   const CLASSES = Object.keys(LABELS_CLASSE)
 
   // Usar apenas classes com dados
-  let classesAtivas = CLASSES.filter((cls) => retornosMensais.some((r) => r[cls] != null))
+  let classesAtivas = CLASSES.filter((cls) => retornosPorClasseDiario[cls].size > 0)
   if (classesAtivas.length < 2) return { error: 'Dados insuficientes. Adicione produtos às classes antes de otimizar.' }
 
   // Janela adaptativa: avança o início até o ponto mais antigo onde todas as classes
   // ativas têm ≥ 60% de cobertura real. Evita que classes com histórico curto
   // contaminem a covariância com zeros excessivos (fill-zero vicia médias e variâncias).
   const MIN_COVERAGE = 0.6
-  const MIN_MONTHS = 12
-  let retornosJanela = retornosMensais.length >= MIN_MONTHS
-    ? retornosMensais.slice(-MIN_MONTHS)
-    : retornosMensais
-  for (let i = 0; i <= retornosMensais.length - MIN_MONTHS; i++) {
-    const slice = retornosMensais.slice(i)
-    if (classesAtivas.every(cls => slice.filter(r => r[cls] != null).length / slice.length >= MIN_COVERAGE)) {
-      retornosJanela = slice
-      break
-    }
+  const MIN_DIAS = 252 // ~12 meses úteis
+  const coberturaJanela = (dias) => classesAtivas.every(
+    cls => dias.filter(d => retornosPorClasseDiario[cls].has(d)).length / dias.length >= MIN_COVERAGE
+  )
+  let diasJanela = diasUteis.length >= MIN_DIAS ? diasUteis.slice(-MIN_DIAS) : diasUteis
+  for (let i = 0; i <= diasUteis.length - MIN_DIAS; i++) {
+    const slice = diasUteis.slice(i)
+    if (coberturaJanela(slice)) { diasJanela = slice; break }
   }
   // Descarta classes sem cobertura suficiente na janela efetiva
   classesAtivas = classesAtivas.filter(
-    cls => retornosJanela.filter(r => r[cls] != null).length / retornosJanela.length >= MIN_COVERAGE
+    cls => diasJanela.filter(d => retornosPorClasseDiario[cls].has(d)).length / diasJanela.length >= MIN_COVERAGE
   )
   if (classesAtivas.length < 2) return { error: 'Dados insuficientes. Adicione produtos às classes antes de otimizar.' }
 
-  const T = retornosJanela.length
-  // Matriz de retornos (fill 0 quando classe sem dado no mês)
-  const retMatrix = retornosJanela.map((row) => classesAtivas.map((cls) => row[cls] ?? 0))
+  const T = diasJanela.length
+  // Matriz de retornos (fill 0 quando classe sem dado no dia)
+  const retMatrix = diasJanela.map((dia) => classesAtivas.map((cls) => retornosPorClasseDiario[cls].get(dia) ?? 0))
 
   const n = classesAtivas.length
   const means = classesAtivas.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
@@ -1992,14 +2213,14 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
   const pesosAtuais = classesAtivas.map((cls) => (ultimaAloc?.[cls] || 0) / 100)
 
   function portfolioStats(weights) {
-    const retMensal = weights.reduce((s, w, i) => s + w * means[i], 0)
+    const retDiario = weights.reduce((s, w, i) => s + w * means[i], 0)
     let variancia = 0
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) variancia += weights[i] * weights[j] * cov[i][j]
     }
-    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(12)
-    const cagr = Math.pow(1 + retMensal, 12) - 1
-    const sharpe = vol > 0 ? (cagr - cdiMedioMensal * 12) / vol : 0
+    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(252)
+    const cagr = Math.pow(1 + retDiario, 252) - 1
+    const sharpe = vol > 0 ? (cagr - cdiMedioDiario * 252) / vol : 0
     return { vol, cagr, sharpe }
   }
 
@@ -2112,7 +2333,7 @@ export function otimizarCarteira(carteiraId, dataInicio, dataFim, nSimulacoes = 
     atual: { weights: toWeightMap({ weights: pesosAtuais }), ...currentStats },
     classes: classesAtivas,
     labels: classesAtivas.map((cls) => LABELS_CLASSE[cls]),
-    n_meses: T,
+    n_dias: T,
     n_simulacoes: nSimulacoes,
   }
 }
@@ -2460,17 +2681,137 @@ function gerarMeses(mesInicioStr, mesFimStr) {
   return meses
 }
 
-// Séries de dados reais por classe (ausência = usando estimativa/fallback)
-const SERIES_BENCHMARK_CLASSE = {
-  pos_fixado:      ['DEBB11_MENSAL'],
-  inflacao:        ['IMAB11_MENSAL'],
-  prefixado:       ['IRFM11_MENSAL'],
-  rf_global:       ['AGG_MENSAL', 'IRX_MENSAL'],
-  multimercado:    ['IHFA_MENSAL'],
-  rv_brasil:       ['IBOV_MENSAL'],
-  fundos_listados: ['IFIX_MENSAL'],
-  rv_global:       ['ACWI_MENSAL', 'IRX_MENSAL'],
-  // alternativos: usa CDI direto, sem série real própria
+// Retorno diário por classe usando os benchmarks passivos — mesma composição
+// de retornoPassivoClasse (incluindo o hedge cambial de rv_global/rf_global
+// via CDI - IRX), só que dia a dia em vez de mês a mês. Todas as 9 classes
+// têm série diária real hoje: ACWI_DIARIO/AGG_DIARIO/IRX_DIARIO (Yahoo, sem
+// equivalente Economatica) fecharam a lacuna que só existia pra rv_global/
+// rf_global. Usado pelo otimizador "livre" (sem carteira associada).
+const SERIE_DIARIA_BENCHMARK_CLASSE = {
+  inflacao:        'IMAB_DIARIO',
+  prefixado:       'IRFM_DIARIO',
+  rv_brasil:       'IBOV_DIARIO',
+  fundos_listados: 'IFIX_DIARIO',
+  multimercado:    'IHFA_DIARIO',
+  rv_global:       'ACWI_DIARIO',
+  rf_global:       'AGG_DIARIO',
+}
+
+// Retornos diários (razão dia-a-dia) de uma série de NÍVEL em dados_macro,
+// alinhados ao calendário de dias úteis, com "último valor conhecido" pra
+// preencher datas sem publicação daquele índice específico.
+function retornosDiariosNivelMacro(serie, diasUteis, bufferStr, fimStr, db) {
+  const rows = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie=? AND data>=? AND data<=? ORDER BY data`
+  ).all(serie, bufferStr, fimStr)
+  const porData = new Map(rows.map((r) => [r.data, r.valor]))
+  const ret = new Map()
+  let ultimo = null
+  for (const r of rows) { if (r.data < diasUteis[0]) ultimo = r.valor; else break }
+  for (const dia of diasUteis) {
+    const v = porData.get(dia)
+    if (v != null && ultimo != null && ultimo > 0) ret.set(dia, v / ultimo - 1)
+    if (v != null) ultimo = v
+  }
+  return ret
+}
+
+// Mesma lógica de retornosDiariosNivelMacro, mas para a cota de um produto real
+// (fundo/ETF em cotas_cache) — usado para alternativos (Trend Ouro) e
+// alternativos_usd (GOLD11).
+function retornosDiariosCotaAtivo(identificador, tipo, diasUteis, bufferStr, fimStr, db) {
+  const rows = db.prepare(`
+    SELECT cc.data, cc.valor FROM cotas_cache cc
+    JOIN produtos p ON cc.produto_id = p.id
+    WHERE p.identificador = ? AND p.tipo = ? AND cc.data >= ? AND cc.data <= ? ORDER BY cc.data
+  `).all(identificador, tipo, bufferStr, fimStr)
+  const porData = new Map(rows.map((r) => [r.data, r.valor]))
+  const ret = new Map()
+  let ultimo = null
+  for (const r of rows) { if (r.data < diasUteis[0]) ultimo = r.valor; else break }
+  for (const dia of diasUteis) {
+    const v = porData.get(dia)
+    if (v != null && ultimo != null && ultimo > 0) ret.set(dia, v / ultimo - 1)
+    if (v != null) ultimo = v
+  }
+  return ret
+}
+
+// ETF usado como proxy de "Alternativos dolarizado": GOLD11 (Trend ETF LBMA
+// Ouro, investimento no exterior) — sua cota em BRL já embute o câmbio, ao
+// contrário do Trend Ouro (fundo hedgeado) usado no 'alternativos' normal. O
+// fundo "Trend Ouro Dólar" (CNPJ 35.609.786/0001-23) não tem cobertura na CVM
+// nem posição em nenhuma carteira; GOLD11 tem histórico real desde 12/2020.
+const OURO_USD_ETF_TICKER = 'GOLD11'
+
+function construirRetornosDiariosClasseBenchmark(cls, diasUteis, cdiByData, bufferStr, fimStr, db) {
+  if (cls === 'alternativos') {
+    return retornosDiariosCotaAtivo(OURO_CNPJ_PROXY, 'fundo', diasUteis, bufferStr, fimStr, db)
+  }
+
+  if (cls === 'alternativos_usd') {
+    return retornosDiariosCotaAtivo(OURO_USD_ETF_TICKER, 'acao', diasUteis, bufferStr, fimStr, db)
+  }
+
+  // rv_global_usd/rf_global_usd: ACWI/AGG "puro", sem o hedge cambial CDI-IRX
+  // — a exposição cambial real vem do câmbio à vista USD/BRL (USDBRL_DIARIO).
+  if (cls === 'rv_global_usd' || cls === 'rf_global_usd') {
+    const base = retornosDiariosNivelMacro(cls === 'rv_global_usd' ? 'ACWI_DIARIO' : 'AGG_DIARIO', diasUteis, bufferStr, fimStr, db)
+    const fx = retornosDiariosNivelMacro('USDBRL_DIARIO', diasUteis, bufferStr, fimStr, db)
+    const ret = new Map()
+    for (const dia of diasUteis) {
+      const b = base.get(dia)
+      const f = fx.get(dia)
+      if (b == null || f == null) continue
+      ret.set(dia, (1 + b) * (1 + f) - 1)
+    }
+    return ret
+  }
+
+  if (cls === 'pos_fixado') {
+    const debb = retornosDiariosNivelMacro('DEBB11_DIARIO', diasUteis, bufferStr, fimStr, db)
+    const ret = new Map()
+    for (const dia of diasUteis) {
+      const d = debb.get(dia)
+      if (d == null) continue
+      ret.set(dia, 0.6 * (cdiByData.get(dia) ?? 0) + 0.4 * d)
+    }
+    return ret
+  }
+
+  if (cls === 'rv_global' || cls === 'rf_global') {
+    const base = retornosDiariosNivelMacro(cls === 'rv_global' ? 'ACWI_DIARIO' : 'AGG_DIARIO', diasUteis, bufferStr, fimStr, db)
+    const irxRows = db.prepare(
+      `SELECT data, valor FROM dados_macro WHERE serie='IRX_DIARIO' AND data>=? AND data<=? ORDER BY data`
+    ).all(bufferStr, fimStr)
+    const irxPorData = new Map(irxRows.map((r) => [r.data, r.valor]))
+    let ultimoIrx = null
+    for (const r of irxRows) { if (r.data < diasUteis[0]) ultimoIrx = r.valor; else break }
+    const ret = new Map()
+    for (const dia of diasUteis) {
+      const v = irxPorData.get(dia)
+      if (v != null) ultimoIrx = v
+      const b = base.get(dia)
+      if (b == null || ultimoIrx == null) continue
+      const irxDiario = Math.pow(1 + ultimoIrx / 100, 1 / 252) - 1
+      ret.set(dia, b + (cdiByData.get(dia) ?? 0) - irxDiario)
+    }
+    return ret
+  }
+
+  const serie = SERIE_DIARIA_BENCHMARK_CLASSE[cls]
+  return serie ? retornosDiariosNivelMacro(serie, diasUteis, bufferStr, fimStr, db) : new Map()
+}
+
+// Classes sintéticas exclusivas do otimizador "livre" — versões dolarizadas
+// (sem o hedge cambial CDI-IRX) de RV Global/RF Global, e Alternativos via
+// GOLD11 em vez do Trend Ouro hedgeado. Não fazem parte da taxonomia de 9
+// classes usada pelas carteiras reais (alocacoes_macro/produtos.classe); só
+// existem aqui, como benchmarks hipotéticos pra comparação no Monte Carlo.
+const CLASSES_SINTETICAS_LIVRE = {
+  rv_global_usd:    'RV Global (dolarizado)',
+  rf_global_usd:    'RF Global (dolarizado)',
+  alternativos_usd: 'Alternativos (dolarizado)',
 }
 
 export function otimizarMacroLivre(dataInicio, dataFim, nSimulacoes = 5000, minPeso = 0, maxPeso = 1, classesParam = null) {
@@ -2486,48 +2827,52 @@ export function otimizarMacroLivre(dataInicio, dataFim, nSimulacoes = 5000, minP
 
   if (meses.length < 12) return { error: 'Período insuficiente (mínimo 12 meses).' }
 
-  const cdiRows = getCDIMensalLocal(mesInicioStr, mesFimStr)
-  const cdiMedioMensal = cdiRows.length > 0
-    ? cdiRows.reduce((s, r) => s + r.valor / 100, 0) / cdiRows.length
-    : 0.01
-
   // classesParam permite ao usuário escolher quais classes incluir.
-  // Se não informado, usa todas exceto 'alternativos' (CDI puro = variância ~zero, distorce a fronteira).
-  const CLASSES_VALIDAS = Object.keys(LABELS_CLASSE).filter(c => c !== 'alternativos')
+  const CLASSES_VALIDAS = [...Object.keys(LABELS_CLASSE), ...Object.keys(CLASSES_SINTETICAS_LIVRE)]
   const CLASSES = classesParam
     ? classesParam.filter(c => CLASSES_VALIDAS.includes(c))
     : CLASSES_VALIDAS
 
   if (CLASSES.length < 2) return { error: 'Selecione ao menos 2 classes para otimizar.' }
 
-  const retornosMensais = meses.map((mes) => {
-    const mesData = mes + '-01'
-    const cdiRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='CDI_MENSAL' AND data=?`).get(mesData)
-    const cdiMensal = cdiRow ? cdiRow.valor / 100 : cdiMedioMensal
-    const ipcaRow = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IPCA_MENSAL' AND data=?`).get(mesData)
-    const ipcaMensal = ipcaRow ? ipcaRow.valor / 100 : 0.004
-    const row = { mes }
-    for (const cls of CLASSES) row[cls] = retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db)
-    return row
-  })
+  // Calendário de dias úteis via CDI_DIARIO — mesmo padrão diário já usado em
+  // calcularSerieDiaria/calcularMetricas/otimizarDentroClasse. 24 pontos
+  // mensais é pouco pra estimar covariância entre 9 classes; diário dá ~500.
+  const [efy, efm] = mesFimStr.split('-').map(Number)
+  const dataInicioStr = `${mesInicioStr}-01`
+  const dataFimStr = new Date(efy, efm, 0).toISOString().split('T')[0]
 
-  const classesAtivas = CLASSES.filter((cls) => retornosMensais.some((r) => r[cls] != null))
-  if (classesAtivas.length < 2) return { error: 'Dados de benchmark insuficientes. Sincronize os dados macro.' }
+  const cdiRowsDiario = db.prepare(
+    `SELECT data, valor FROM dados_macro WHERE serie='CDI_DIARIO' AND data >= ? AND data <= ? ORDER BY data`
+  ).all(dataInicioStr, dataFimStr)
+  if (cdiRowsDiario.length < 15) return { error: 'Período insuficiente de dados (mínimo ~1 mês útil).' }
+  const diasUteis = cdiRowsDiario.map((r) => r.data)
+  const cdiByData = new Map(cdiRowsDiario.map((r) => [r.data, r.valor / 100]))
+  const cdiMedioDiario = cdiRowsDiario.reduce((s, r) => s + r.valor / 100, 0) / cdiRowsDiario.length
 
-  // Qualidade dos dados: conta meses com série real vs estimativa/fallback
-  const qualidade_dados = Object.fromEntries(
-    classesAtivas.map((cls) => {
-      const series = SERIES_BENCHMARK_CLASSE[cls]
-      if (!series) return [cls, { meses_reais: 0, total: meses.length, apenas_estimativa: true }]
-      const mesesReais = meses.filter((mes) =>
-        series.every((serie) => db.prepare(`SELECT 1 FROM dados_macro WHERE serie=? AND data=?`).get(serie, mes + '-01') != null)
-      ).length
-      return [cls, { meses_reais: mesesReais, total: meses.length, apenas_estimativa: false }]
-    })
+  const bufferInicio = new Date(dataInicioStr + 'T12:00:00')
+  bufferInicio.setDate(bufferInicio.getDate() - 10)
+  const bufferStr = bufferInicio.toISOString().split('T')[0]
+
+  const retornosPorClasse = Object.fromEntries(
+    CLASSES.map((cls) => [cls, construirRetornosDiariosClasseBenchmark(cls, diasUteis, cdiByData, bufferStr, dataFimStr, db)])
   )
 
-  const T = retornosMensais.length
-  const retMatrix = retornosMensais.map((row) => classesAtivas.map((cls) => row[cls] ?? 0))
+  const classesAtivas = CLASSES.filter((cls) => retornosPorClasse[cls].size > 0)
+  if (classesAtivas.length < 2) return { error: 'Dados de benchmark insuficientes. Sincronize os dados macro.' }
+
+  // Qualidade dos dados: quantos dias úteis do período têm retorno real vs
+  // ficam de fora (sem publicação do índice naquele dia específico).
+  const qualidade_dados = Object.fromEntries(
+    classesAtivas.map((cls) => [cls, {
+      dias_reais: retornosPorClasse[cls].size,
+      total: diasUteis.length,
+      apenas_estimativa: retornosPorClasse[cls].size === 0,
+    }])
+  )
+
+  const T = diasUteis.length
+  const retMatrix = diasUteis.map((dia) => classesAtivas.map((cls) => retornosPorClasse[cls].get(dia) ?? 0))
   const n = classesAtivas.length
   const means = classesAtivas.map((_, j) => retMatrix.reduce((s, row) => s + row[j], 0) / T)
 
@@ -2539,13 +2884,13 @@ export function otimizarMacroLivre(dataInicio, dataFim, nSimulacoes = 5000, minP
   const pesosAtuais = classesAtivas.map(() => 1 / classesAtivas.length)
 
   function portfolioStats(weights) {
-    const retMensal = weights.reduce((s, w, i) => s + w * means[i], 0)
+    const retDiario = weights.reduce((s, w, i) => s + w * means[i], 0)
     let variancia = 0
     for (let i = 0; i < n; i++)
       for (let j = 0; j < n; j++) variancia += weights[i] * weights[j] * cov[i][j]
-    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(12)
-    const cagr = Math.pow(1 + retMensal, 12) - 1
-    const sharpe = vol > 0 ? (cagr - cdiMedioMensal * 12) / vol : 0
+    const vol = Math.sqrt(Math.max(variancia, 0)) * Math.sqrt(252)
+    const cagr = Math.pow(1 + retDiario, 252) - 1
+    const sharpe = vol > 0 ? (cagr - cdiMedioDiario * 252) / vol : 0
     return { vol, cagr, sharpe }
   }
 
@@ -2633,9 +2978,9 @@ export function otimizarMacroLivre(dataInicio, dataFim, nSimulacoes = 5000, minP
     paridade_risco: { weights: toWeightMap({ weights: pesosRP }), ...portfolioStats(pesosRP) },
     atual: { weights: toWeightMap({ weights: pesosAtuais }), ...portfolioStats(pesosAtuais) },
     classes: classesAtivas,
-    labels: classesAtivas.map((cls) => LABELS_CLASSE[cls]),
+    labels: classesAtivas.map((cls) => LABELS_CLASSE[cls] || CLASSES_SINTETICAS_LIVRE[cls]),
     qualidade_dados,
-    n_meses: T,
+    n_dias: T,
     n_simulacoes: nSimulacoes,
     livre: true,
   }

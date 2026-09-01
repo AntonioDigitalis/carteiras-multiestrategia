@@ -1040,3 +1040,49 @@ export async function garantirIndicesDiarios(dataFim) {
     }
   }
 }
+
+// ACWI/AGG/IRX (RF Global e RV Global) só existiam em mensal — sem feed
+// nacional (Economatica) equivalente para ancorar, então a série *_DIARIO
+// nasce direto na escala do Yahoo (mesma fonte já usada para derivar o mensal).
+const INDICES_GLOBAIS_DIARIOS = [
+  { serie: 'AGG_DIARIO',    ticker: 'AGG'   },
+  { serie: 'ACWI_DIARIO',   ticker: 'ACWI'  },
+  { serie: 'IRX_DIARIO',    ticker: '^IRX'  },
+  { serie: 'USDBRL_DIARIO', ticker: 'BRL=X' }, // câmbio à vista — versões "dolarizadas" (sem hedge) de RV/RF Global
+]
+
+export async function garantirIndicesGlobaisDiarios(dataInicio, dataFim) {
+  const db = getDb()
+  const hoje = new Date().toISOString().split('T')[0]
+  const fim = (dataFim && dataFim < hoje) ? dataFim : hoje
+
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO dados_macro (serie, data, valor, fonte) VALUES (?, ?, ?, 'Yahoo')`
+  )
+
+  for (const { serie, ticker } of INDICES_GLOBAIS_DIARIOS) {
+    try {
+      const last = db.prepare(`SELECT data FROM dados_macro WHERE serie=? ORDER BY data DESC LIMIT 1`).get(serie)
+      // Já coberto (folga de 4 dias cobre fins de semana/feriados sem refetch)
+      if (last && Math.round((new Date(fim) - new Date(last.data)) / 86400000) <= 4) continue
+
+      const fetchStart = last ? last.data : dataInicio
+      const result = await _yf.chart(ticker, { period1: fetchStart, period2: fim, interval: '1d' })
+      const quotes = (result.quotes || []).filter((q) => q.close != null)
+
+      let n = 0
+      db.transaction(() => {
+        for (const q of quotes) {
+          const data = q.date.toISOString().split('T')[0]
+          // IRX é taxa (yield), não preço — sem ajuste de dividendo
+          const valor = ticker === '^IRX' ? q.close : (q.adjclose ?? q.close)
+          stmt.run(serie, data, valor)
+          n++
+        }
+      })()
+      if (n > 0) registrarLog('yahoo', serie, n, 'ok', `séries diárias globais até ${fim}`)
+    } catch (e) {
+      console.warn(`[indices-globais-diario] ${serie}:`, e.message)
+    }
+  }
+}

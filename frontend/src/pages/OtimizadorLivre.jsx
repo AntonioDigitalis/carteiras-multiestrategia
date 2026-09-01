@@ -7,18 +7,35 @@ import {
 
 // Benchmark real usado por classe (para exibição)
 const BENCHMARK_CLASSE = {
-  pos_fixado:      'DEBB11 + CDI',
-  inflacao:        'IMA-B (IMAB11)',
-  prefixado:       'IRF-M (IRFM11)',
-  rf_global:       'AGG + hedge BRL',
-  multimercado:    'IHFA',
-  rv_brasil:       'Ibovespa',
-  rv_global:       'ACWI + hedge BRL',
-  fundos_listados: 'IFIX',
+  pos_fixado:       'DEBB11 + CDI',
+  inflacao:         'IMA-B (IMAB11)',
+  prefixado:        'IRF-M (IRFM11)',
+  rf_global:        'AGG + hedge BRL',
+  multimercado:     'IHFA',
+  rv_brasil:        'Ibovespa',
+  rv_global:        'ACWI + hedge BRL',
+  fundos_listados:  'IFIX',
+  alternativos:     'Ouro (Trend Ouro)',
+  rv_global_usd:    'ACWI + câmbio USD/BRL',
+  rf_global_usd:    'AGG + câmbio USD/BRL',
+  alternativos_usd: 'Ouro dolarizado (GOLD11)',
 }
 
-const CLASSES_DISPONIVEIS = Object.keys(LABELS_CLASSE_OT).filter(k => k !== 'alternativos')
-const DEFAULT_CLASSES = CLASSES_DISPONIVEIS
+// Classes sintéticas exclusivas deste otimizador: versões dolarizadas (sem
+// hedge cambial) de RV Global/RF Global e Alternativos — não existem como
+// classe real de carteira (alocacoes_macro), só como benchmark hipotético
+// pra comparação no Monte Carlo.
+const CLASSES_EXTRA_LIVRE = {
+  rv_global_usd:    'RV Global (dolarizado)',
+  rf_global_usd:    'RF Global (dolarizado)',
+  alternativos_usd: 'Alternativos (dolarizado)',
+}
+const LABELS_TODAS = { ...LABELS_CLASSE_OT, ...CLASSES_EXTRA_LIVRE }
+
+const CLASSES_DISPONIVEIS = Object.keys(LABELS_TODAS)
+// As 3 versões dolarizadas nascem desmarcadas — evita duplicar exposição
+// com a versão hedgeada da mesma classe já selecionada por padrão.
+const DEFAULT_CLASSES = Object.keys(LABELS_CLASSE_OT)
 
 export default function OtimizadorLivre() {
   const [subTab, setSubTab] = useState('macro')
@@ -114,7 +131,7 @@ function OtimizadorMacroLivre() {
                       : 'bg-bg-tertiary border-border text-slate-500 hover:text-slate-300'
                   }`}
                 >
-                  <span className="font-medium">{LABELS_CLASSE_OT[cls]}</span>
+                  <span className="font-medium">{LABELS_TODAS[cls]}</span>
                   <span className={`text-[10px] ${ativo ? 'text-slate-400' : 'text-slate-600'}`}>
                     {BENCHMARK_CLASSE[cls]}
                   </span>
@@ -153,15 +170,15 @@ function OtimizadorMacroLivre() {
       {resultado && (
         <>
           {/* Alertas de qualidade de dados */}
-          {resultado.qualidade_dados && Object.entries(resultado.qualidade_dados).some(([, q]) => q.meses_reais < q.total) && (
+          {resultado.qualidade_dados && Object.entries(resultado.qualidade_dados).some(([, q]) => q.dias_reais < q.total) && (
             <div className="card border border-amber-800/40 bg-amber-900/10">
               <div className="text-xs font-medium text-amber-400 mb-2">Cobertura de dados por classe</div>
               <div className="space-y-1.5">
                 {Object.entries(resultado.qualidade_dados).map(([cls, q]) => {
-                  if (q.meses_reais === q.total) return null
-                  const pct = Math.round((q.meses_reais / q.total) * 100)
-                  const semDados = q.meses_reais === 0
-                  const label = LABELS_CLASSE_OT[cls] || cls
+                  if (q.dias_reais === q.total) return null
+                  const pct = Math.round((q.dias_reais / q.total) * 100)
+                  const semDados = q.dias_reais === 0
+                  const label = LABELS_TODAS[cls] || cls
                   const benchmark = BENCHMARK_CLASSE[cls] || '—'
                   return (
                     <div key={cls} className={`flex items-start gap-2 text-xs rounded px-2 py-1.5 ${semDados ? 'bg-red-900/20' : 'bg-amber-900/10'}`}>
@@ -170,7 +187,7 @@ function OtimizadorMacroLivre() {
                         <span className={semDados ? 'text-accent-red font-medium' : 'text-amber-400'}>{label}</span>
                         {semDados
                           ? <span className="text-slate-500 ml-1">— sem dados de {benchmark} no banco; toda a série usa estimativa CDI+spread. Considere desmarcar esta classe ou sincronizar os dados macro.</span>
-                          : <span className="text-slate-600 ml-1">— {q.meses_reais}/{q.total} meses com {benchmark} real; restante usa estimativa CDI+spread</span>
+                          : <span className="text-slate-600 ml-1">— {q.dias_reais}/{q.total} dias com {benchmark} real; restante usa estimativa CDI+spread</span>
                         }
                       </div>
                       <span className={`font-mono flex-shrink-0 ${semDados ? 'text-accent-red' : 'text-amber-500'}`}>{pct}%</span>
@@ -220,7 +237,7 @@ function OtimizadorMacroLivre() {
               </tbody>
             </table>
             <div className="mt-3 text-[10px] text-slate-600">
-              Baseado em {resultado.n_meses} meses · {resultado.n_simulacoes?.toLocaleString()} simulações · benchmarks passivos por classe
+              Baseado em {resultado.n_dias} dias úteis · {resultado.n_simulacoes?.toLocaleString()} simulações · benchmarks passivos por classe
             </div>
           </div>
         </>

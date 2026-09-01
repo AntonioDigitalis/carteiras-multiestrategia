@@ -844,7 +844,7 @@ function OtimizadorMacro({ carteiraId, period }) {
               </tbody>
             </table>
             <div className="mt-3 text-[10px] text-slate-600">
-              Baseado em {resultado.n_meses} meses de dados · {resultado.n_simulacoes?.toLocaleString()} simulações
+              Baseado em {resultado.n_dias} dias úteis de dados · {resultado.n_simulacoes?.toLocaleString()} simulações
             </div>
           </div>
         </>
