@@ -696,6 +696,13 @@ function calcularSerieDiaria(carteiraId, dataInicio, dataFim) {
   `).all(carteiraId, dataFim, dataInicio)
   if (!estados.length) return null
 
+  // Nunca deixa a série (nem o CDI de comparação) começar antes do primeiro
+  // estado real da carteira — do contrário o CDI acumula "de graça" nos dias
+  // anteriores à carteira existir, inflando artificialmente qualquer
+  // comparação vs. benchmark (retorno_vs_cdi_pct, Sharpe etc.) sempre que o
+  // período pedido (ex: preset "12M") for mais longo que a vida da carteira.
+  if (dataInicio < estados[0].data_inicio) dataInicio = estados[0].data_inicio
+
   // Produtos de todos os estados (batch)
   const estadoIds = estados.map((e) => e.id)
   const phE = estadoIds.map(() => '?').join(',')
@@ -1231,11 +1238,14 @@ export function calcularPassiva(carteiraId, dataInicio, dataFim) {
   ).get(carteiraId)
   if (!carteira) return null
 
-  // Mesmo critério de "Início" que calcularMetricas: usa o primeiro estado da carteira
-  const primeiroEstado = !dataInicio
-    ? db.prepare(`SELECT MIN(data_inicio) as data_inicio FROM estados_portfolio WHERE carteira_id = ?`).get(carteiraId)
-    : null
-  const inicioEfetivo = dataInicio || primeiroEstado?.data_inicio || '2020-01-01'
+  // Nunca deixa a série (nem o benchmark passivo) começar antes do primeiro
+  // estado real da carteira — mesmo raciocínio de calcularSerieDiaria: sem
+  // isso, o passivo acumula "de graça" nos dias anteriores à carteira
+  // existir sempre que o período pedido (ex: preset "12M") for mais longo
+  // que a vida da carteira, distorcendo a comparação ativa vs. passiva.
+  const primeiroEstado = db.prepare(`SELECT MIN(data_inicio) as data_inicio FROM estados_portfolio WHERE carteira_id = ?`).get(carteiraId)
+  const primeiraDataReal = primeiroEstado?.data_inicio ?? '2020-01-01'
+  const inicioEfetivo = dataInicio && dataInicio > primeiraDataReal ? dataInicio : primeiraDataReal
 
   const mesInicioStr = inicioEfetivo.slice(0, 7)
   const mesFimStr = dataFim?.slice(0, 7) || new Date().toISOString().slice(0, 7)
