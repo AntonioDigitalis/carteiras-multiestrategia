@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { useCarteira, useMetricas } from '../hooks/useCarteiras'
+import { useCarteira, useCarteiras, useMetricas } from '../hooks/useCarteiras'
 import PeriodSelector, { resolvePeriod } from '../components/ui/PeriodSelector'
 import { MetricCard, MetricRow } from '../components/ui/MetricCard'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
@@ -114,7 +114,7 @@ export default function CarteiraIndividual() {
         <>
           {tab === 'overview' && <OverviewTab metricas={metricas} />}
           {tab === 'retorno' && <RetornoTab metricas={metricas} />}
-          {tab === 'risco' && <RiscoTab metricas={metricas} />}
+          {tab === 'risco' && <RiscoTab metricas={metricas} carteiraId={id} period={period} />}
           {tab === 'correlacao' && <CorrelacaoTab carteiraId={id} period={period} />}
           {tab === 'atribuicao' && <AtribuicaoTab carteiraId={id} period={period} />}
           {tab === 'passiva' && <PassivaTab carteiraId={id} period={period} />}
@@ -319,8 +319,29 @@ function RetornoTab({ metricas }) {
   )
 }
 
-function ContribuicaoRiscoCard({ contribuicaoRisco }) {
+const COR_COMPARACAO = '#a855f7'
+
+function ContribuicaoRiscoCard({ contribuicaoRisco, carteiraId, period }) {
   const fmtPctSimples = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`
+  const { carteiras } = useCarteiras()
+  const [compareId, setCompareId] = useState('')
+  const [compareData, setCompareData] = useState(null)
+  const [compareLoading, setCompareLoading] = useState(false)
+
+  useEffect(() => {
+    if (!compareId) { setCompareData(null); return }
+    let cancelled = false
+    setCompareLoading(true)
+    const params = {}
+    if (period?.start) params.start = period.start
+    if (period?.end) params.end = period.end
+    api.getMetricas(compareId, params)
+      .then((d) => { if (!cancelled) setCompareData(d?.contribuicao_risco ?? null) })
+      .catch(() => { if (!cancelled) setCompareData(null) })
+      .finally(() => { if (!cancelled) setCompareLoading(false) })
+    return () => { cancelled = true }
+  }, [compareId, period?.start, period?.end])
+
   if (!contribuicaoRisco) {
     return (
       <div className="card">
@@ -329,30 +350,73 @@ function ContribuicaoRiscoCard({ contribuicaoRisco }) {
       </div>
     )
   }
+
+  const outrasCarteiras = carteiras.filter((c) => String(c.id) !== String(carteiraId))
+  const nomeComparada = carteiras.find((c) => String(c.id) === String(compareId))?.nome
+
   return (
     <div className="card">
-      <div className="text-sm font-medium text-slate-300 mb-1">Contribuição de Risco por Classe</div>
-      <p className="text-xs text-slate-500 mb-3">
-        Quanto cada classe responde pela volatilidade anualizada da carteira ({fmtPct(contribuicaoRisco.volatilidade_total)}), considerando peso atual e correlação com as demais.
-      </p>
-      <div className="space-y-2.5">
+      <div className="flex items-start justify-between gap-4 mb-1">
+        <div>
+          <div className="text-sm font-medium text-slate-300">Contribuição de Risco por Classe</div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Quanto cada classe responde pela volatilidade anualizada da carteira ({fmtPct(contribuicaoRisco.volatilidade_total)}), considerando peso atual e correlação com as demais.
+          </p>
+        </div>
+        <select
+          value={compareId}
+          onChange={(e) => setCompareId(e.target.value)}
+          className="text-xs bg-bg-tertiary border border-border rounded px-2 py-1.5 text-slate-300 flex-shrink-0"
+        >
+          <option value="">Comparar com...</option>
+          {outrasCarteiras.map((c) => (
+            <option key={c.id} value={c.id}>{c.nome}</option>
+          ))}
+        </select>
+      </div>
+
+      {compareId && (
+        <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-2 mb-1">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-blue/70" />Esta carteira</span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: COR_COMPARACAO, opacity: 0.7 }} />
+            {nomeComparada ?? '—'}{compareLoading ? ' (carregando...)' : ''}
+          </span>
+        </div>
+      )}
+
+      <div className="space-y-3 mt-3">
         {contribuicaoRisco.linhas.map((l) => {
           const semDados = l.contribuicao_pct == null
+          const lB = compareData?.linhas.find((x) => x.classe === l.classe)
+          const semDadosB = !lB || lB.contribuicao_pct == null
           return (
             <div key={l.classe}>
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-slate-400">{l.label}</span>
-                <span className="font-mono text-slate-500">
-                  peso <span className="text-slate-300">{fmtPctSimples(l.peso)}</span>
-                  <span className="text-slate-700 mx-1.5">·</span>
-                  risco <span className={semDados ? 'text-slate-500' : 'text-slate-200'}>{fmtPctSimples(l.contribuicao_pct)}</span>
+              <div className="text-xs text-slate-400 mb-1">{l.label}</div>
+
+              <div className="flex items-center gap-2 mb-1">
+                <div className="flex-1 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+                  {!semDados && (
+                    <div className="h-full rounded-full bg-accent-blue/70" style={{ width: `${Math.min(Math.max(l.contribuicao_pct * 100, 0), 100)}%` }} />
+                  )}
+                </div>
+                <span className="font-mono text-[11px] text-slate-500 w-36 text-right flex-shrink-0">
+                  peso <span className="text-slate-300">{fmtPctSimples(l.peso)}</span> · risco <span className={semDados ? 'text-slate-500' : 'text-slate-200'}>{fmtPctSimples(l.contribuicao_pct)}</span>
                 </span>
               </div>
-              <div className="h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
-                {!semDados && (
-                  <div className="h-full rounded-full bg-accent-blue/70" style={{ width: `${Math.min(Math.max(l.contribuicao_pct * 100, 0), 100)}%` }} />
-                )}
-              </div>
+
+              {compareId && (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+                    {!semDadosB && (
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(Math.max(lB.contribuicao_pct * 100, 0), 100)}%`, backgroundColor: COR_COMPARACAO, opacity: 0.7 }} />
+                    )}
+                  </div>
+                  <span className="font-mono text-[11px] text-slate-600 w-36 text-right flex-shrink-0">
+                    peso <span className="text-slate-400">{fmtPctSimples(lB?.peso)}</span> · risco <span className={semDadosB ? 'text-slate-600' : 'text-slate-400'}>{fmtPctSimples(lB?.contribuicao_pct)}</span>
+                  </span>
+                </div>
+              )}
             </div>
           )
         })}
@@ -361,7 +425,7 @@ function ContribuicaoRiscoCard({ contribuicaoRisco }) {
   )
 }
 
-function RiscoTab({ metricas }) {
+function RiscoTab({ metricas, carteiraId, period }) {
   const m = metricas
   const fmtPct2 = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`
   return (
@@ -422,7 +486,7 @@ function RiscoTab({ metricas }) {
         </div>
       </div>
 
-      <ContribuicaoRiscoCard contribuicaoRisco={m.contribuicao_risco} />
+      <ContribuicaoRiscoCard contribuicaoRisco={m.contribuicao_risco} carteiraId={carteiraId} period={period} />
     </div>
   )
 }
