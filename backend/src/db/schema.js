@@ -187,12 +187,12 @@ INSERT OR IGNORE INTO perfis (id, nome, ordem) VALUES (2, 'Moderado', 2);
 INSERT OR IGNORE INTO perfis (id, nome, ordem) VALUES (3, 'Arrojado', 3);
 
 -- Inserir carteiras padrão se não existirem
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (1, 1, 'A', 'Conservador A');
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (2, 1, 'B', 'Conservador B');
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (3, 2, 'A', 'Moderado A');
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (4, 2, 'B', 'Moderado B');
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (5, 3, 'A', 'Arrojado A');
-INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (6, 3, 'B', 'Arrojado B');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (1, 1, 'A', 'Conservador Alfa Light');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (2, 1, 'B', 'Conservador Alfa Brasil');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (3, 2, 'A', 'Moderado Alfa Light');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (4, 2, 'B', 'Moderado Alfa Brasil');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (5, 3, 'A', 'Arrojado Alfa Light');
+INSERT OR IGNORE INTO carteiras (id, perfil_id, tipo, nome) VALUES (6, 3, 'B', 'Arrojado Alfa Brasil');
 
 -- Configurações padrão
 INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('versao', '1.0.0');

@@ -12,12 +12,12 @@ INSERT OR REPLACE INTO perfis (id, nome, ordem, created_at) VALUES (4, 'FIIs', 4
 INSERT OR REPLACE INTO perfis (id, nome, ordem, created_at) VALUES (5, 'Ações', 5, '2026-05-21 21:15:47');
 
 -- carteiras (9 registros)
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (1, 1, 'A', 'Conservador A', NULL, '2025-01-01 00:00:00');
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (2, 1, 'B', 'Conservador Alfa', NULL, '2025-01-01 00:00:00');
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (3, 2, 'A', 'Moderado A', NULL, '2025-01-01 00:00:00');
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (4, 2, 'B', 'Moderado Alfa', NULL, '2025-01-01 00:00:00');
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (5, 3, 'A', 'Arrojado A', NULL, '2025-01-01 00:00:00');
-INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (6, 3, 'B', 'Arrojado Alfa', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (1, 1, 'A', 'Conservador Alfa Light', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (2, 1, 'B', 'Conservador Alfa Brasil', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (3, 2, 'A', 'Moderado Alfa Light', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (4, 2, 'B', 'Moderado Alfa Brasil', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (5, 3, 'A', 'Arrojado Alfa Light', NULL, '2025-01-01 00:00:00');
+INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (6, 3, 'B', 'Arrojado Alfa Brasil', NULL, '2025-01-01 00:00:00');
 INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (8, 5, 'A', 'Carteira Top Ações', NULL, '2026-05-21 21:15:47');
 INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (9, 5, 'B', 'Carteira Top Dividendos', NULL, '2026-05-21 21:15:47');
 INSERT OR REPLACE INTO carteiras (id, perfil_id, tipo, nome, descricao, created_at) VALUES (10, 4, 'A', 'Carteira de FIIs', NULL, '2026-05-26 18:52:40');

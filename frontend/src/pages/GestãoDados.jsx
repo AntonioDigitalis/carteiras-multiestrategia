@@ -133,7 +133,7 @@ export default function GestãoDados() {
               <span>
                 Esta carteira não possui produtos cadastrados em nenhum mês.
                 Os produtos são específicos por carteira — verifique se selecionou a carteira correta
-                (ex: <strong>Conservador Alfa</strong> em vez de <strong>Conservador A</strong>).
+                (ex: <strong>Conservador Alfa Brasil</strong> em vez de <strong>Conservador Alfa Light</strong>).
               </span>
             </div>
           )}
