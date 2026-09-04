@@ -124,8 +124,26 @@ export default function CarteiraIndividual() {
   )
 }
 
+// Antepõe um ponto zerado um dia antes do primeiro ponto da série, pros
+// campos acumulados indicados. A série diária não tem um "dia zero" — o
+// primeiro ponto já embute o retorno do próprio primeiro dia útil, então o
+// gráfico parecia não começar do zero (mais perceptível em carteiras
+// jovens/pouco voláteis).
+function comPontoZero(serie, campos = ['retorno_acumulado', 'cdi_acumulado']) {
+  if (!serie?.length) return serie
+  const primeiro = serie[0]
+  const dataAnterior = new Date(primeiro.data + 'T12:00:00')
+  dataAnterior.setDate(dataAnterior.getDate() - 1)
+  const pontoZero = { data: dataAnterior.toISOString().split('T')[0] }
+  for (const campo of campos) {
+    if (primeiro[campo] != null) pontoZero[campo] = 0
+  }
+  return [pontoZero, ...serie]
+}
+
 function OverviewTab({ metricas }) {
   const m = metricas
+  const serieChart = comPontoZero(m.serie_retorno_diaria ?? m.serie_retorno)
   return (
     <div className="space-y-6">
       {/* KPI cards */}
@@ -159,11 +177,11 @@ function OverviewTab({ metricas }) {
       </div>
 
       {/* Gráfico de performance */}
-      {(m.serie_retorno_diaria ?? m.serie_retorno)?.length > 0 && (
+      {serieChart?.length > 0 && (
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-4">Retorno Acumulado</div>
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={m.serie_retorno_diaria ?? m.serie_retorno}>
+            <AreaChart data={serieChart}>
               <defs>
                 <linearGradient id="retGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -198,7 +216,7 @@ function OverviewTab({ metricas }) {
                 dot={false}
                 name="Carteira"
               />
-              {(m.serie_retorno_diaria ?? m.serie_retorno)[0]?.cdi_acumulado != null && (
+              {serieChart[0]?.cdi_acumulado != null && (
                 <Line
                   type="monotone"
                   dataKey="cdi_acumulado"
@@ -248,7 +266,7 @@ function OverviewTab({ metricas }) {
 
 function RetornoTab({ metricas }) {
   const m = metricas
-  const serieAcum = m.serie_retorno_diaria ?? m.serie_retorno
+  const serieAcum = comPontoZero(m.serie_retorno_diaria ?? m.serie_retorno)
 
   return (
     <div className="space-y-4">
@@ -688,15 +706,16 @@ function PassivaTab({ carteiraId, period }) {
 
   const ma = data.metricas_ativo
   const mp = data.metricas_passivo
+  const seriePassiva = comPontoZero(data.serie_diaria ?? data.serie, ['ativo_acumulado', 'passivo_acumulado'])
 
   return (
     <div className="space-y-6">
       {/* Gráfico retorno acumulado */}
-      {(data.serie_diaria ?? data.serie)?.length > 1 && (
+      {seriePassiva?.length > 1 && (
         <div className="card">
           <div className="text-sm font-medium text-slate-300 mb-4">Retorno Acumulado: Ativa vs Passiva</div>
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={data.serie_diaria ?? data.serie}>
+            <LineChart data={seriePassiva}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
               <XAxis
                 dataKey="data"
