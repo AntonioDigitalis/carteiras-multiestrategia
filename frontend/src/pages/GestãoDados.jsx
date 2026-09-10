@@ -718,7 +718,7 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
         </span>
       </div>
 
-      {/* Datas + botão salvar vigência */}
+      {/* Datas */}
       <div className="flex flex-wrap items-end gap-3 text-xs">
         <div>
           <label className="label">Data Início</label>
@@ -738,6 +738,22 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
             className="input text-xs py-1"
           />
         </div>
+      </div>
+
+      {/* Comentários / Motivo das alterações — salvo junto com a vigência, pelo botão abaixo */}
+      <div>
+        <label className="label">Comentários (opcional)</label>
+        <textarea
+          rows={2}
+          placeholder="Motivo das alterações neste período…"
+          value={estado.notas || ''}
+          onChange={(e) => { onUpdate({ ...estado, notas: e.target.value }); setDatesSaved(false) }}
+          className="input text-xs py-1.5 w-full resize-none"
+        />
+      </div>
+
+      {/* Botão salvar vigência + comentários */}
+      <div>
         {estado.id ? (
           <button
             onClick={salvarVigencia}
@@ -749,25 +765,13 @@ function EstadoProdutos({ estado, carteiraId, mes, alocacao, onUpdate }) {
                 : 'btn-primary'
             )}
           >
-            {savingDates ? 'Salvando...' : datesSaved ? <><Check size={12} /> Salvo</> : 'Salvar Vigência'}
+            {savingDates ? 'Salvando...' : datesSaved ? <><Check size={12} /> Salvo</> : 'Salvar Vigência e Comentários'}
           </button>
         ) : (
-          <span className="text-[10px] text-slate-500 italic pb-1.5">
-            Datas serão salvas ao adicionar o primeiro produto
+          <span className="text-[10px] text-slate-500 italic">
+            Datas e comentários serão salvos ao adicionar o primeiro produto
           </span>
         )}
-      </div>
-
-      {/* Comentários / Motivo das alterações */}
-      <div>
-        <label className="label">Comentários (opcional)</label>
-        <textarea
-          rows={2}
-          placeholder="Motivo das alterações neste período…"
-          value={estado.notas || ''}
-          onChange={(e) => { onUpdate({ ...estado, notas: e.target.value }); setDatesSaved(false) }}
-          className="input text-xs py-1.5 w-full resize-none"
-        />
       </div>
 
       {/* Filtro */}
