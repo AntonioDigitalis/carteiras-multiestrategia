@@ -137,6 +137,20 @@ export const api = {
     }
     return r.blob()
   },
+  gerarRelatorioMensal: async (carteiraIds) => {
+    const r = await fetch('/api/relatorios/mensal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ carteira_ids: carteiraIds }),
+    })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      let msg = r.statusText
+      try { const j = JSON.parse(body); msg = j.error || j.message || msg } catch (_) { if (body) msg = body }
+      throw new Error(msg || `HTTP ${r.status}`)
+    }
+    return r.blob()
+  },
   getAtivosClasse: (carteiraId, classe) =>
     request(`/carteiras/${carteiraId}/ativos-classe?classe=${classe}`),
   otimizarClasse: (carteiraId, body) =>

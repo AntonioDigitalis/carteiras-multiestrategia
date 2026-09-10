@@ -10,6 +10,7 @@ import auditoriaRouter from './routes/auditoria.js'
 import externalRouter from './routes/external.js'
 import configRouter from './routes/config.js'
 import otimizadorRouter from './routes/otimizador.js'
+import relatoriosRouter from './routes/relatorios.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -35,6 +36,7 @@ app.use('/api/auditoria', auditoriaRouter)
 app.use('/api/external', externalRouter)
 app.use('/api/config', configRouter)
 app.use('/api/otimizador', otimizadorRouter)
+app.use('/api/relatorios', relatoriosRouter)
 
 // Health check
 app.get('/api/health', (req, res) => {

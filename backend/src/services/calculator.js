@@ -3567,3 +3567,87 @@ export function calcularAtribuicao(carteiraId, dataInicio, dataFim) {
 
   return { classes, retorno_total: retornoTotal }
 }
+
+// ── Relatório mensal (dados brutos p/ exportação em Excel) ────────────────
+// Reúne, para uma carteira: (1) série diária base-100 da carteira vs. CDI
+// desde o início; (2) atribuição por classe/ativo desde a vigência da
+// alocação atual (não simplesmente "sem data_fim" — o mês seguinte pode já
+// estar pré-cadastrado com vigência futura sem o mês corrente ter sido
+// fechado, deixando os dois com data_fim nula ao mesmo tempo) até a data
+// mais recente com cota disponível em todos os fundos/ações hoje alocados;
+// (3) a própria alocação vigente.
+export function calcularDadosRelatorioMensal(carteiraId) {
+  const db = getDb()
+  const carteira = db.prepare('SELECT * FROM carteiras WHERE id = ?').get(carteiraId)
+  if (!carteira) return null
+  const hoje = new Date().toISOString().split('T')[0]
+
+  const metricas = calcularMetricas(carteiraId, null, null)
+  const serie = metricas?.serie_retorno_diaria ?? []
+  let serieBase100 = []
+  if (serie.length > 0) {
+    const primeiro = serie[0]
+    const dataAnterior = new Date(primeiro.data + 'T12:00:00')
+    dataAnterior.setDate(dataAnterior.getDate() - 1)
+    const serieComPontoZero = [
+      { data: dataAnterior.toISOString().split('T')[0], retorno_acumulado: 0, cdi_acumulado: 0 },
+      ...serie,
+    ]
+    serieBase100 = serieComPontoZero.map((p) => ({
+      data: p.data,
+      cota_carteira: +((1 + p.retorno_acumulado) * 100).toFixed(4),
+      cota_cdi: p.cdi_acumulado != null ? +((1 + p.cdi_acumulado) * 100).toFixed(4) : null,
+    }))
+  }
+
+  // Estado vigente (já em vigor hoje) — base da atribuição, que explica o
+  // retorno de um período que já aconteceu.
+  const estadoVigente = db.prepare(
+    `SELECT * FROM estados_portfolio WHERE carteira_id = ? AND data_inicio <= ? ORDER BY data_inicio DESC LIMIT 1`
+  ).get(carteiraId, hoje)
+  if (!estadoVigente) return null
+  const inicioAtribuicao = estadoVigente.data_inicio
+
+  const produtosVigentes = db.prepare(`SELECT * FROM produtos WHERE estado_id = ?`).all(estadoVigente.id)
+
+  let fimComum = hoje
+  for (const p of produtosVigentes.filter((p) => (p.tipo === 'fundo' || p.tipo === 'acao') && (p.peso || 0) > 0)) {
+    const row = db.prepare(
+      `SELECT MAX(cc.data) as maxd FROM cotas_cache cc JOIN produtos pp ON cc.produto_id = pp.id WHERE pp.identificador = ? AND pp.tipo = ?`
+    ).get(p.identificador, p.tipo)
+    if (row?.maxd && row.maxd < fimComum) fimComum = row.maxd
+  }
+
+  const atribuicao = calcularAtribuicao(carteiraId, inicioAtribuicao, fimComum)
+
+  // Estado mais recente cadastrado — pode já estar pré-cadastrado com
+  // vigência futura (ex: setembro publicado mas só vale a partir de dia 11),
+  // sem que o mês corrente tenha sido formalmente fechado. A alocação a
+  // informar ao investidor é sempre a mais nova, não a que já está rodando.
+  const estadoMaisRecente = db.prepare(
+    `SELECT * FROM estados_portfolio WHERE carteira_id = ? ORDER BY data_inicio DESC LIMIT 1`
+  ).get(carteiraId)
+  const produtosMaisRecentes = db.prepare(`SELECT * FROM produtos WHERE estado_id = ?`).all(estadoMaisRecente.id)
+
+  const alocacaoAtual = produtosMaisRecentes
+    .filter((p) => (p.peso || 0) > 0)
+    .sort((a, b) => (b.peso || 0) - (a.peso || 0))
+    .map((p) => ({
+      classe: LABELS_CLASSE[p.classe] ?? p.classe,
+      nome: p.nome,
+      identificador: p.identificador ?? '',
+      tipo: p.tipo,
+      peso: +(p.peso).toFixed(2),
+    }))
+
+  return {
+    carteira: carteira.nome,
+    serieBase100,
+    atribuicaoInicio: inicioAtribuicao,
+    atribuicaoFim: fimComum,
+    atribuicao,
+    alocacaoAtualInicio: estadoMaisRecente.data_inicio,
+    alocacaoAtualNotas: estadoMaisRecente.notas || null,
+    alocacaoAtual,
+  }
+}

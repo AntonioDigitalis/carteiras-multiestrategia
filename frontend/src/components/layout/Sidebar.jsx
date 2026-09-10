@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Check,
   X,
+  FileText,
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { useCarteiras } from '../../hooks/useCarteiras'
@@ -24,6 +25,7 @@ const navItems = [
   { to: '/gestao', icon: Database, label: 'Gestão de Dados' },
   { to: '/auditoria', icon: Shield, label: 'Auditoria' },
   { to: '/comparador', icon: GitCompare, label: 'Comparador' },
+  { to: '/relatorios', icon: FileText, label: 'Relatórios' },
   { to: '/configuracoes', icon: Settings, label: 'Configurações' },
 ]
 

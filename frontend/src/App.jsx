@@ -7,6 +7,7 @@ import Auditoria from './pages/Auditoria'
 import Comparador from './pages/Comparador'
 import Configurações from './pages/Configurações'
 import OtimizadorLivre from './pages/OtimizadorLivre'
+import Relatorios from './pages/Relatorios'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="comparador" element={<Comparador />} />
           <Route path="configuracoes" element={<Configurações />} />
           <Route path="otimizador" element={<OtimizadorLivre />} />
+          <Route path="relatorios" element={<Relatorios />} />
         </Route>
       </Routes>
     </BrowserRouter>
