@@ -30,6 +30,16 @@ const BENCHMARKS_PASSIVA = {
 // os produtos de ouro já presentes no sistema.
 const OURO_CNPJ_PROXY = '22.963.439/0001-52'
 
+// Proxy de ACWI com hedge cambial para o benchmark de rv_global — fundo real
+// (Trend Bolsas Globais) em vez da fórmula sintética ACWI + (CDI - IRX):
+// reflete melhor a fricção prática do hedge do que a aproximação teórica.
+// Soma-se de volta a taxa de administração pra obter o retorno "bruto",
+// comparável de forma justa com os fundos de rv_global da própria carteira
+// (líquidos de taxa, cada um da sua). Decisão do usuário em 2026-09-11,
+// taxa confirmada em fonte externa (XP Asset) e pelo próprio gestor do fundo.
+const ACWI_HEDGE_CNPJ_PROXY = '37.553.464/0001-35' // Trend Bolsas Globais
+const ACWI_HEDGE_TAXA_ADM_AA = 0.005 // 0,50% a.a.
+
 // Spreads de fallback quando índice real não estiver disponível
 const SPREADS_FALLBACK_AA = {
   inflacao:       { base: 'ipca', spread: 0.055 },
@@ -146,6 +156,29 @@ function retornoNivelCotaCache(identificador, inicio, fim, db) {
   return v1.valor / v0.valor - 1
 }
 
+// Retorno "bruto de taxa" do Trend Bolsas Globais num período [inicio,fim]:
+// pega o retorno líquido real da cota (primeira/última observação DENTRO da
+// janela — mesma convenção de retornoNivelDiario, usada tanto pra chamadas
+// de período inteiro quanto, via benchmarkDoDia em calcularAtribuicao, uma
+// janela de 1 dia por vez) e soma de volta a taxa de administração
+// proporcional aos passos (dias úteis) ENTRE as duas cotas observadas — não
+// à contagem de dias do período pedido, que inclui os dois extremos e
+// dobraria a taxa aplicada quando chamada dia a dia.
+function retornoBrutoAcwiHedge(inicio, fim, db) {
+  const v0 = db.prepare(
+    `SELECT cc.data, cc.valor FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id
+     WHERE p.identificador = ? AND cc.data >= ? AND cc.data <= ? ORDER BY cc.data LIMIT 1`
+  ).get(ACWI_HEDGE_CNPJ_PROXY, inicio, fim)
+  const v1 = db.prepare(
+    `SELECT cc.data, cc.valor FROM cotas_cache cc JOIN produtos p ON cc.produto_id = p.id
+     WHERE p.identificador = ? AND cc.data >= ? AND cc.data <= ? ORDER BY cc.data DESC LIMIT 1`
+  ).get(ACWI_HEDGE_CNPJ_PROXY, inicio, fim)
+  if (!v0 || !v1 || v0.valor == null || v1.valor == null || v0.valor <= 0) return null
+  const retLiquido = v1.valor / v0.valor - 1
+  const passos = Math.max(contarDiasUteis(v0.data, v1.data, db) - 1, 0)
+  return (1 + retLiquido) * Math.pow(1 + ACWI_HEDGE_TAXA_ADM_AA, passos / 252) - 1
+}
+
 function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
   const mesData = mes + '-01'
 
@@ -204,8 +237,15 @@ function retornoPassivoClasse(cls, mes, cdiMensal, ipcaMensal, db) {
     return cdiMensal + (Math.pow(1.01, 1 / 12) - 1)
   }
 
-  // rv_global: ACWI + hedge cambial ≈ retorno_local + (CDI - taxa_USD_mensal).
+  // rv_global: retorno bruto de taxa do Trend Bolsas Globais (fundo real de
+  // ACWI com hedge) — cai pra fórmula sintética ACWI + (CDI - IRX) só se a
+  // cota do fundo não estiver disponível no mês (não deveria acontecer,
+  // histórico real desde 2020).
   if (cls === 'rv_global') {
+    const [ano, m] = mes.split('-').map(Number)
+    const ultimoDiaMes = new Date(ano, m, 0).toISOString().split('T')[0]
+    const bruto = retornoBrutoAcwiHedge(mesData, ultimoDiaMes, db)
+    if (bruto != null) return bruto
     const acwi = db.prepare(`SELECT valor FROM dados_macro WHERE serie='ACWI_MENSAL' AND data=?`).get(mesData)
     const irx  = db.prepare(`SELECT valor FROM dados_macro WHERE serie='IRX_MENSAL' AND data=?`).get(mesData)
     if (acwi && irx) {
@@ -2695,11 +2735,11 @@ function gerarMeses(mesInicioStr, mesFimStr) {
 }
 
 // Retorno diário por classe usando os benchmarks passivos — mesma composição
-// de retornoPassivoClasse (incluindo o hedge cambial de rv_global/rf_global
-// via CDI - IRX), só que dia a dia em vez de mês a mês. Todas as 9 classes
-// têm série diária real hoje: ACWI_DIARIO/AGG_DIARIO/IRX_DIARIO (Yahoo, sem
-// equivalente Economatica) fecharam a lacuna que só existia pra rv_global/
-// rf_global. Usado pelo otimizador "livre" (sem carteira associada).
+// de retornoPassivoClasse, só que dia a dia em vez de mês a mês. rv_global e
+// rf_global são tratados à parte em construirRetornosDiariosClasseBenchmark
+// (fundo real bruto de taxa, e hedge cambial via CDI-IRX, respectivamente) —
+// as entradas abaixo nunca chegam a ser lidas pra essas duas classes.
+// Usado pelo otimizador "livre" (sem carteira associada).
 const SERIE_DIARIA_BENCHMARK_CLASSE = {
   inflacao:        'IMAB_DIARIO',
   prefixado:       'IRFM_DIARIO',
@@ -2750,6 +2790,17 @@ function retornosDiariosCotaAtivo(identificador, tipo, diasUteis, bufferStr, fim
   return ret
 }
 
+// Mesma lógica de retornosDiariosCotaAtivo, mas soma de volta uma taxa de
+// administração (a.a.) dia a dia — usado pro benchmark de rv_global (Trend
+// Bolsas Globais), que deve representar o retorno "bruto de taxa".
+function retornosDiariosCotaAtivoBruto(identificador, tipo, taxaAdmAA, diasUteis, bufferStr, fimStr, db) {
+  const retLiquido = retornosDiariosCotaAtivo(identificador, tipo, diasUteis, bufferStr, fimStr, db)
+  const fatorDiario = Math.pow(1 + taxaAdmAA, 1 / 252)
+  const ret = new Map()
+  for (const [dia, r] of retLiquido) ret.set(dia, (1 + r) * fatorDiario - 1)
+  return ret
+}
+
 // ETF usado como proxy de "Alternativos dolarizado": GOLD11 (Trend ETF LBMA
 // Ouro, investimento no exterior) — sua cota em BRL já embute o câmbio, ao
 // contrário do Trend Ouro (fundo hedgeado) usado no 'alternativos' normal. O
@@ -2792,8 +2843,14 @@ function construirRetornosDiariosClasseBenchmark(cls, diasUteis, cdiByData, buff
     return ret
   }
 
-  if (cls === 'rv_global' || cls === 'rf_global') {
-    const base = retornosDiariosNivelMacro(cls === 'rv_global' ? 'ACWI_DIARIO' : 'AGG_DIARIO', diasUteis, bufferStr, fimStr, db)
+  // rv_global: retorno bruto de taxa do Trend Bolsas Globais (fundo real de
+  // ACWI com hedge), não a fórmula sintética ACWI + (CDI - IRX).
+  if (cls === 'rv_global') {
+    return retornosDiariosCotaAtivoBruto(ACWI_HEDGE_CNPJ_PROXY, 'fundo', ACWI_HEDGE_TAXA_ADM_AA, diasUteis, bufferStr, fimStr, db)
+  }
+
+  if (cls === 'rf_global') {
+    const base = retornosDiariosNivelMacro('AGG_DIARIO', diasUteis, bufferStr, fimStr, db)
     const irxRows = db.prepare(
       `SELECT data, valor FROM dados_macro WHERE serie='IRX_DIARIO' AND data>=? AND data<=? ORDER BY data`
     ).all(bufferStr, fimStr)
@@ -3171,8 +3228,8 @@ function contarDiasUteis(inicio, fim, db) {
 }
 
 // Benchmark da classe numa janela arbitrária, a partir das séries diárias.
-// Retorna null quando não há série diária para a classe (rf_global/rv_global,
-// ou IHFA/DEBB11 além da cobertura) — o chamador faz fallback pro-rata.
+// Retorna null quando não há série diária para a classe (rf_global, ou
+// IHFA/DEBB11 além da cobertura) — o chamador faz fallback pro-rata.
 const SERIE_DIARIA_CLASSE = {
   inflacao: 'IMAB_DIARIO',
   prefixado: 'IRFM_DIARIO',
@@ -3182,6 +3239,7 @@ const SERIE_DIARIA_CLASSE = {
 }
 function retornoBenchmarkPeriodo(cls, inicio, fim, db) {
   if (cls === 'alternativos') return retornoNivelCotaCache(OURO_CNPJ_PROXY, inicio, fim, db)
+  if (cls === 'rv_global') return retornoBrutoAcwiHedge(inicio, fim, db)
   if (cls === 'pos_fixado') {
     const cdi = retornoCDIPeriodo(inicio, fim, db)
     const debb = retornoNivelDiario('DEBB11_DIARIO', inicio, fim, db)
