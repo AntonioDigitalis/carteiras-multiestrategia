@@ -20,7 +20,7 @@ const BENCHMARKS_PASSIVA = {
   rf_global:       'AGG + Hedge BRL',
   multimercado:    'IHFA',
   rv_brasil:       'Ibovespa',
-  rv_global:       'ACWI + Hedge BRL',
+  rv_global:       'Trend Bolsas Globais (bruto de taxa)',
   fundos_listados: 'IFIX',
   alternativos:    'Ouro (Trend Ouro)',  // provisório — sem série de índice de ouro dedicada ainda
 }

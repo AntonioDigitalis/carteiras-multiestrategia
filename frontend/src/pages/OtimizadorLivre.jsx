@@ -13,7 +13,7 @@ const BENCHMARK_CLASSE = {
   rf_global:        'AGG + hedge BRL',
   multimercado:     'IHFA',
   rv_brasil:        'Ibovespa',
-  rv_global:        'ACWI + hedge BRL',
+  rv_global:        'Trend Bolsas Globais (bruto de taxa)',
   fundos_listados:  'IFIX',
   alternativos:     'Ouro (Trend Ouro)',
   rv_global_usd:    'ACWI + câmbio USD/BRL',
